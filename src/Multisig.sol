@@ -61,9 +61,10 @@ contract Multisig {
             );
 
             address prev;
+            address signer;
             uint256 _threshold = threshold;
             for (uint256 i; i != _threshold; ++i) {
-                address signer = ecrecover(hash, v[i], r[i], s[i]);
+                signer = ecrecover(hash, v[i], r[i], s[i]);
                 require(isOwner[signer] && signer > prev, InvalidSig());
                 prev = signer;
             }
@@ -103,6 +104,8 @@ contract Multisig {
 
     receive() external payable {}
 
+    /// @dev Handles all ERC721 and ERC1155 token safety callbacks.
+    /// Adapted from Solady (https://github.com/Vectorized/solady/blob/main/src/accounts/Receiver.sol)
     fallback() external payable {
         assembly ("memory-safe") {
             let s := shr(224, calldataload(0))

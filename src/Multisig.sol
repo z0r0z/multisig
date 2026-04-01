@@ -23,11 +23,13 @@ contract Multisig {
         require(_threshold > 0 && _threshold <= _owners.length, InvalidInit());
         threshold = _threshold;
         address prev;
+        address owner;
         for (uint256 i; i != _owners.length; ++i) {
-            require(_owners[i] > prev, InvalidInit());
-            isOwner[_owners[i]] = true;
-            owners.push(_owners[i]);
-            prev = _owners[i];
+            owner = _owners[i];
+            require(owner > prev, InvalidInit());
+            isOwner[owner] = true;
+            owners.push(owner);
+            prev = owner;
         }
     }
 

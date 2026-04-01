@@ -60,7 +60,8 @@ contract Multisig {
         );
 
         address prev;
-        for (uint256 i; i != threshold; ++i) {
+        uint256 _threshold = threshold;
+        for (uint256 i; i != _threshold; ++i) {
             address signer = ecrecover(hash, v[i], r[i], s[i]);
             require(isOwner[signer] && signer > prev, InvalidSig());
             prev = signer;

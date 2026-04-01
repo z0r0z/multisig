@@ -89,11 +89,12 @@ contract Multisig {
     }
 
     function removeOwner(address _owner) public payable onlySelf {
-        require(isOwner[_owner], InvalidConfig());
-        isOwner[_owner] = false;
-        uint256 len = owners.length;
-        for (uint256 i; i != len; ++i) {
-            unchecked {
+        unchecked {
+            uint256 len = owners.length;
+            require(isOwner[_owner], InvalidConfig());
+            require(len - 1 >= threshold, InvalidConfig());
+            isOwner[_owner] = false;
+            for (uint256 i; i != len; ++i) {
                 if (owners[i] == _owner) {
                     owners[i] = owners[len - 1];
                     owners.pop();
@@ -101,7 +102,6 @@ contract Multisig {
                 }
             }
         }
-        require(len - 1 >= threshold, InvalidConfig());
     }
 
     function setThreshold(uint128 _threshold) public payable onlySelf {

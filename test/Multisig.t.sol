@@ -28,6 +28,7 @@ contract MultisigTest is Test {
 
     // EIP-712
     bytes32 constant EXECUTE_TYPEHASH = keccak256("Execute(address to,uint256 value,bytes data,uint128 nonce)");
+    bytes32 constant SAFE_MSG_TYPEHASH = keccak256("SafeMessage(bytes32 hash)");
 
     function setUp() public {
         owner1 = vm.addr(pk1);
@@ -97,6 +98,11 @@ contract MultisigTest is Test {
         returns (bytes memory sigs)
     {
         bytes32 hash = _digest(w, to, value, data);
+        sigs = _signHash(hash, pks);
+    }
+
+    /// @dev Sign a raw hash with a set of private keys.
+    function _signHash(bytes32 hash, uint256[] memory pks) internal pure returns (bytes memory sigs) {
         sigs = new bytes(pks.length * 65);
         for (uint256 i; i < pks.length; ++i) {
             (uint8 vi, bytes32 ri, bytes32 si) = vm.sign(pks[i], hash);
@@ -108,6 +114,14 @@ contract MultisigTest is Test {
                 mstore8(add(ptr, 0x40), vi)
             }
         }
+    }
+
+    /// @dev Compute the EIP-712 safe message digest that isValidSignature verifies against.
+    function _safeDigest(Multisig w, bytes32 hash) internal view returns (bytes32) {
+        return
+            keccak256(
+                abi.encodePacked("\x19\x01", w.DOMAIN_SEPARATOR(), keccak256(abi.encode(SAFE_MSG_TYPEHASH, hash)))
+            );
     }
 
     /// @dev Returns private keys sorted by their corresponding address (ascending).
@@ -451,7 +465,7 @@ contract MultisigTest is Test {
 
         bytes memory sigs = _sign(wallet, rev, 1 ether, "", _pks2());
 
-        vm.expectRevert();
+        vm.expectRevert(bytes("nope"));
         wallet.execute(rev, 1 ether, "", sigs);
     }
 
@@ -641,6 +655,135 @@ contract MultisigTest is Test {
             .call(abi.encodeWithSelector(selector_, address(0), address(0), new uint256[](0), new uint256[](0), ""));
         assertTrue(ok);
         assertEq(abi.decode(ret, (bytes4)), selector_);
+    }
+
+    // ═══════════════════════════════════════════
+    //              EIP-1271 TESTS
+    // ═══════════════════════════════════════════
+
+    function test_isValidSignature_returnsMagicValue() public {
+        wallet = _deploy(2);
+        bytes32 hash = keccak256("test message");
+        bytes memory sigs = _signHash(_safeDigest(wallet, hash), _pks2());
+
+        bytes4 result = wallet.isValidSignature(hash, sigs);
+        assertEq(result, bytes4(0x1626ba7e));
+    }
+
+    function test_isValidSignature_magicValueMatchesSelector() public {
+        wallet = _deploy(2);
+        bytes4 expected = Multisig.isValidSignature.selector;
+        assertEq(expected, bytes4(0x1626ba7e));
+    }
+
+    function test_isValidSignature_allSigners() public {
+        wallet = _deploy(3);
+        bytes32 hash = keccak256("test message");
+        bytes memory sigs = _signHash(_safeDigest(wallet, hash), _pks3());
+
+        assertEq(wallet.isValidSignature(hash, sigs), bytes4(0x1626ba7e));
+    }
+
+    function test_isValidSignature_threshold1() public {
+        wallet = _deploy(1);
+        bytes32 hash = keccak256("test message");
+        address[] memory sorted = _sortedOwners();
+
+        uint256 pk;
+        if (vm.addr(pk1) == sorted[0]) pk = pk1;
+        else if (vm.addr(pk2) == sorted[0]) pk = pk2;
+        else pk = pk3;
+
+        bytes memory sigs = _signHash(_safeDigest(wallet, hash), _pksSingle(pk));
+        assertEq(wallet.isValidSignature(hash, sigs), bytes4(0x1626ba7e));
+    }
+
+    function test_isValidSignature_revertInvalidSigner() public {
+        wallet = _deploy(2);
+        bytes32 hash = keccak256("test message");
+
+        uint256 fakePk = 0xDEAD;
+        uint256[] memory pks = new uint256[](2);
+        pks[0] = pk1;
+        pks[1] = fakePk;
+        pks = _sortedPKs(pks);
+
+        bytes memory sigs = _signHash(_safeDigest(wallet, hash), pks);
+        vm.expectRevert(Multisig.InvalidSig.selector);
+        wallet.isValidSignature(hash, sigs);
+    }
+
+    function test_isValidSignature_revertDuplicateSigner() public {
+        wallet = _deploy(2);
+        bytes32 hash = keccak256("test message");
+
+        uint256[] memory pks = new uint256[](2);
+        pks[0] = pk1;
+        pks[1] = pk1;
+
+        bytes memory sigs = _signHash(_safeDigest(wallet, hash), pks);
+        vm.expectRevert(Multisig.InvalidSig.selector);
+        wallet.isValidSignature(hash, sigs);
+    }
+
+    function test_isValidSignature_revertWrongOrder() public {
+        wallet = _deploy(2);
+        bytes32 hash = keccak256("test message");
+
+        uint256[] memory pks = _pks2();
+        (pks[0], pks[1]) = (pks[1], pks[0]);
+
+        bytes memory sigs = _signHash(_safeDigest(wallet, hash), pks);
+        vm.expectRevert(Multisig.InvalidSig.selector);
+        wallet.isValidSignature(hash, sigs);
+    }
+
+    function test_isValidSignature_revertInsufficientSigs() public {
+        wallet = _deploy(2);
+        bytes32 hash = keccak256("test message");
+
+        bytes memory sigs = _signHash(hash, _pksSingle(pk1));
+        vm.expectRevert(Multisig.InvalidSig.selector);
+        wallet.isValidSignature(hash, sigs);
+    }
+
+    function test_isValidSignature_revertEmptySigs() public {
+        wallet = _deploy(2);
+        bytes32 hash = keccak256("test message");
+
+        vm.expectRevert(Multisig.InvalidSig.selector);
+        wallet.isValidSignature(hash, "");
+    }
+
+    // ═══════════════════════════════════════════
+    //              GETOWNERS TESTS
+    // ═══════════════════════════════════════════
+
+    function test_getOwners() public {
+        wallet = _deploy(2);
+        address[] memory sorted = _sortedOwners();
+        address[] memory result = wallet.getOwners();
+        assertEq(result.length, 3);
+        for (uint256 i; i < 3; ++i) {
+            assertEq(result[i], sorted[i]);
+        }
+    }
+
+    function test_getOwners_afterAddRemove() public {
+        wallet = _deploy(2);
+        address newOwner = address(0xBEEF);
+
+        // add owner
+        bytes memory data = abi.encodeCall(Multisig.addOwner, (newOwner));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        wallet.execute(address(wallet), 0, data, sigs);
+        assertEq(wallet.getOwners().length, 4);
+
+        // remove owner
+        data = abi.encodeCall(Multisig.removeOwner, (newOwner));
+        sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        wallet.execute(address(wallet), 0, data, sigs);
+        assertEq(wallet.getOwners().length, 3);
     }
 
     // ═══════════════════════════════════════════

@@ -4,7 +4,6 @@ pragma solidity ^0.8.34;
 contract Multisig {
     uint128 public nonce;
     uint128 public threshold;
-    bytes32 public DOMAIN_SEPARATOR;
     bytes32 constant EXECUTE_TYPEHASH = keccak256("Execute(address to,uint256 value,bytes data,uint128 nonce)");
 
     address[] public owners;
@@ -30,7 +29,10 @@ contract Multisig {
             owners.push(_owners[i]);
             prev = _owners[i];
         }
-        DOMAIN_SEPARATOR = keccak256(
+    }
+
+    function DOMAIN_SEPARATOR() public view returns (bytes32) {
+        return keccak256(
             abi.encode(
                 keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
                 keccak256("Multisig"),
@@ -54,7 +56,7 @@ contract Multisig {
         bytes32 hash = keccak256(
             abi.encodePacked(
                 "\x19\x01",
-                DOMAIN_SEPARATOR,
+                DOMAIN_SEPARATOR(),
                 keccak256(abi.encode(EXECUTE_TYPEHASH, to, value, keccak256(data), nonce++))
             )
         );

@@ -19,12 +19,13 @@ contract Multisig {
     error Unauthorized();
 
     function init(address[] calldata _owners, uint128 _threshold) public payable {
+        uint256 len = _owners.length;
         require(threshold == 0, InvalidInit());
-        require(_threshold > 0 && _threshold <= _owners.length, InvalidInit());
+        require(_threshold > 0 && _threshold <= len, InvalidInit());
         threshold = _threshold;
         address prev;
         address owner;
-        for (uint256 i; i != _owners.length; ++i) {
+        for (uint256 i; i != len; ++i) {
             owner = _owners[i];
             require(owner > prev, InvalidInit());
             isOwner[owner] = true;

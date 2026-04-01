@@ -9,19 +9,21 @@ contract Multisig {
     address[] public owners;
     mapping(address => bool) public isOwner;
 
+    error InvalidSig();
+    error InvalidInit();
+    error InvalidCall();
+    error Unauthorized();
+    error InvalidConfig();
+
     modifier onlySelf() {
         require(msg.sender == address(this), Unauthorized());
         _;
     }
 
-    error InvalidSig();
-    error InvalidInit();
-    error Unauthorized();
-
     function init(address[] calldata _owners, uint128 _threshold) public payable {
         uint256 len = _owners.length;
         require(threshold == 0, InvalidInit());
-        require(_threshold != 0,  InvalidInit());
+        require(_threshold != 0, InvalidInit());
         require(_threshold <= len, InvalidInit());
         threshold = _threshold;
         address prev;
@@ -69,24 +71,25 @@ contract Multisig {
             uint256 _threshold = threshold;
             for (uint256 i; i != _threshold; ++i) {
                 signer = ecrecover(hash, v[i], r[i], s[i]);
-                require(isOwner[signer] && signer > prev, InvalidSig());
+                require(isOwner[signer], InvalidSig());
+                require(signer > prev, InvalidSig());
                 prev = signer;
             }
 
             (bool ok,) = to.call{value: value}(data);
-            require(ok);
+            require(ok, InvalidCall());
         }
     }
 
     function addOwner(address _owner) public payable onlySelf {
-        require(!isOwner[_owner], Unauthorized());
-        require(_owner != address(0), Unauthorized());
+        require(!isOwner[_owner], InvalidConfig());
+        require(_owner != address(0), InvalidConfig());
         isOwner[_owner] = true;
         owners.push(_owner);
     }
 
     function removeOwner(address _owner) public payable onlySelf {
-        require(isOwner[_owner], Unauthorized());
+        require(isOwner[_owner], InvalidConfig());
         isOwner[_owner] = false;
         uint256 len = owners.length;
         for (uint256 i; i != len; ++i) {
@@ -98,11 +101,12 @@ contract Multisig {
                 }
             }
         }
-        require(owners.length >= threshold);
+        require(owners.length >= threshold, InvalidConfig());
     }
 
     function setThreshold(uint128 _threshold) public payable onlySelf {
-        require(_threshold > 0 && _threshold <= owners.length, Unauthorized());
+        require(_threshold != 0, InvalidConfig());
+        require(_threshold <= owners.length, InvalidConfig());
         threshold = _threshold;
     }
 

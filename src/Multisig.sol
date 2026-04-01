@@ -101,7 +101,7 @@ contract Multisig {
                 }
             }
         }
-        require(owners.length >= threshold, InvalidConfig());
+        require(len - 1 >= threshold, InvalidConfig());
     }
 
     function setThreshold(uint128 _threshold) public payable onlySelf {
@@ -117,23 +117,21 @@ contract Multisig {
     fallback() external payable {
         assembly ("memory-safe") {
             let s := shr(224, calldataload(0))
-            // 0x150b7a02: `onERC721Received(address,address,uint256,bytes)`.
-            // 0xf23a6e61: `onERC1155Received(address,address,uint256,uint256,bytes)`.
-            // 0xbc197c81: `onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)`.
             if or(eq(s, 0x150b7a02), or(eq(s, 0xf23a6e61), eq(s, 0xbc197c81))) {
-                mstore(0x20, s) // Load into memory slot.
-                return(0x3c, 0x20) // Return `msg.sig`.
+                mstore(0x20, s)
+                return(0x3c, 0x20)
             }
         }
     }
 }
 
 contract MultisigFactory {
-    address public immutable implementation;
-
     event Created(address indexed wallet);
 
+    address public immutable implementation;
+
     error DeploymentFailed();
+    error SaltDoesNotStartWith();
 
     constructor() payable {
         implementation = address(new Multisig{salt: bytes32(0)}());
@@ -142,25 +140,31 @@ contract MultisigFactory {
         Multisig(payable(implementation)).init(lock, 1);
     }
 
-    function create(address[] calldata _owners, uint128 _threshold) public payable returns (address wallet) {
-        wallet = _clonePUSH0(implementation);
-        Multisig(payable(wallet)).init{value: msg.value}(_owners, _threshold);
-        emit Created(wallet);
-    }
-
-    /// @dev Deploys a PUSH0 clone of `impl`.
-    /// Adapted from Solady (https://github.com/vectorized/solady/blob/main/src/utils/LibClone.sol)
-    function _clonePUSH0(address impl) internal returns (address instance) {
+    /// @dev Create deterministic multisig wallet with PUSH0 and CREATE2.
+    /// Adapted from Solady (https://github.com/vectorized/solady/blob/main/src/utils/LibClone.sol).
+    /// The salt must start with the zero address or the caller for front-running protection.
+    function create(address[] calldata _owners, uint128 _threshold, uint256 salt)
+        public
+        payable
+        returns (address wallet)
+    {
+        address impl = implementation;
         assembly ("memory-safe") {
-            mstore(0x24, 0x5af43d5f5f3e6029573d5ffd5b3d5ff3) // 16
-            mstore(0x14, impl) // 20
-            mstore(0x00, 0x602d5f8160095f39f35f5f365f5f37365f73) // 9 + 9
-            instance := create(0, 0x0e, 0x36)
-            if iszero(instance) {
-                mstore(0x00, 0x30116425) // `DeploymentFailed()`
+            if iszero(or(iszero(shr(96, salt)), eq(shr(96, salt), caller()))) {
+                mstore(0x00, 0x0c4549ef) // SaltDoesNotStartWith()
                 revert(0x1c, 0x04)
             }
-            mstore(0x24, 0) // Restore the overwritten part of the free memory pointer.
+            mstore(0x24, 0x5af43d5f5f3e6029573d5ffd5b3d5ff3)
+            mstore(0x14, impl)
+            mstore(0x00, 0x602d5f8160095f39f35f5f365f5f37365f73)
+            wallet := create2(0, 0x0e, 0x36, salt)
+            if iszero(wallet) {
+                mstore(0x00, 0x30116425) // DeploymentFailed()
+                revert(0x1c, 0x04)
+            }
+            mstore(0x24, 0)
         }
+        Multisig(payable(wallet)).init{value: msg.value}(_owners, _threshold);
+        emit Created(wallet);
     }
 }

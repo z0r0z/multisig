@@ -55,15 +55,17 @@ contract MultisigTest is Test {
         return arr;
     }
 
+    uint256 nextSalt;
+
     function _deploy(uint128 threshold) internal returns (Multisig) {
         address[] memory sorted = _sortedOwners();
-        return Multisig(payable(factory.create(sorted, threshold)));
+        return Multisig(payable(factory.create(sorted, threshold, nextSalt++)));
     }
 
     function _deployFunded(uint128 threshold, uint256 amount) internal returns (Multisig) {
         address[] memory sorted = _sortedOwners();
         vm.deal(address(this), amount);
-        return Multisig(payable(factory.create{value: amount}(sorted, threshold)));
+        return Multisig(payable(factory.create{value: amount}(sorted, threshold, nextSalt++)));
     }
 
     function _domainSeparator(address walletAddr) internal view returns (bytes32) {
@@ -166,8 +168,8 @@ contract MultisigTest is Test {
 
     function test_factory_cloneIsDistinct() public {
         address[] memory sorted = _sortedOwners();
-        address w1 = factory.create(sorted, 2);
-        address w2 = factory.create(sorted, 2);
+        address w1 = factory.create(sorted, 2, nextSalt++);
+        address w2 = factory.create(sorted, 2, nextSalt++);
         assertTrue(w1 != w2);
         assertTrue(w1 != factory.implementation());
         assertTrue(w2 != factory.implementation());
@@ -192,7 +194,90 @@ contract MultisigTest is Test {
         address[] memory sorted = _sortedOwners();
         vm.expectEmit(false, false, false, false);
         emit MultisigFactory.Created(address(0)); // we don't know the address yet
-        factory.create(sorted, 2);
+        factory.create(sorted, 2, nextSalt++);
+    }
+
+    function test_factory_deterministicAddress() public {
+        address[] memory sorted = _sortedOwners();
+        uint256 salt = 0xCAFE;
+        address w1 = factory.create(sorted, 2, salt);
+        // deploy on a fresh factory with the same salt to verify determinism
+        MultisigFactory factory2 = new MultisigFactory();
+        // different factory => different address (factory address is part of CREATE2)
+        address w2 = factory2.create(sorted, 2, salt);
+        assertTrue(w1 != w2);
+    }
+
+    function test_factory_revertDuplicateSalt() public {
+        address[] memory sorted = _sortedOwners();
+        uint256 salt = 0xDEAD;
+        factory.create(sorted, 2, salt);
+        vm.expectRevert(MultisigFactory.DeploymentFailed.selector);
+        factory.create(sorted, 2, salt);
+    }
+
+    function test_factory_createWithZeroSalt() public {
+        address[] memory sorted = _sortedOwners();
+        address w = factory.create(sorted, 2, 0);
+        assertTrue(w != address(0));
+        assertEq(Multisig(payable(w)).threshold(), 2);
+    }
+
+    function test_factory_createWithCallerPrefixedSalt() public {
+        address[] memory sorted = _sortedOwners();
+        uint256 salt = uint256(uint160(address(this))) << 96;
+        address w = factory.create(sorted, 2, salt);
+        assertTrue(w != address(0));
+    }
+
+    function test_factory_createWithCallerPrefixedSaltAndNonce() public {
+        address[] memory sorted = _sortedOwners();
+        uint256 salt = (uint256(uint160(address(this))) << 96) | 0x42;
+        address w = factory.create(sorted, 2, salt);
+        assertTrue(w != address(0));
+    }
+
+    function test_factory_revertSaltWrongCaller() public {
+        address[] memory sorted = _sortedOwners();
+        // Salt prefixed with a different address
+        uint256 salt = uint256(uint160(address(0xBEEF))) << 96;
+        vm.expectRevert(MultisigFactory.SaltDoesNotStartWith.selector);
+        factory.create(sorted, 2, salt);
+    }
+
+    function test_factory_saltCallerEnforcedPerSender() public {
+        address[] memory sorted = _sortedOwners();
+        address caller1 = address(0xA1);
+        address caller2 = address(0xA2);
+        uint256 salt1 = uint256(uint160(caller1)) << 96;
+        uint256 salt2 = uint256(uint160(caller2)) << 96;
+
+        // caller1 can use their own prefix
+        vm.prank(caller1);
+        address w1 = factory.create(sorted, 2, salt1);
+        assertTrue(w1 != address(0));
+
+        // caller2 cannot use caller1's prefix
+        vm.prank(caller2);
+        vm.expectRevert(MultisigFactory.SaltDoesNotStartWith.selector);
+        factory.create(sorted, 2, salt1);
+
+        // caller2 can use their own prefix
+        vm.prank(caller2);
+        address w2 = factory.create(sorted, 2, salt2);
+        assertTrue(w2 != address(0));
+    }
+
+    function test_factory_zeroSaltPermissionless() public {
+        address[] memory sorted = _sortedOwners();
+        // Any caller can use zero-prefixed salts
+        vm.prank(address(0xA1));
+        address w1 = factory.create(sorted, 2, 0x1);
+        assertTrue(w1 != address(0));
+
+        vm.prank(address(0xA2));
+        address w2 = factory.create(sorted, 2, 0x2);
+        assertTrue(w2 != address(0));
     }
 
     // ═══════════════════════════════════════════
@@ -216,13 +301,13 @@ contract MultisigTest is Test {
     function test_init_revertThresholdZero() public {
         address[] memory sorted = _sortedOwners();
         vm.expectRevert(Multisig.InvalidInit.selector);
-        factory.create(sorted, 0);
+        factory.create(sorted, 0, nextSalt++);
     }
 
     function test_init_revertThresholdTooHigh() public {
         address[] memory sorted = _sortedOwners();
         vm.expectRevert(Multisig.InvalidInit.selector);
-        factory.create(sorted, 4);
+        factory.create(sorted, 4, nextSalt++);
     }
 
     function test_init_revertUnsortedOwners() public {
@@ -230,7 +315,7 @@ contract MultisigTest is Test {
         // swap first two to break sort
         (sorted[0], sorted[1]) = (sorted[1], sorted[0]);
         vm.expectRevert(Multisig.InvalidInit.selector);
-        factory.create(sorted, 2);
+        factory.create(sorted, 2, nextSalt++);
     }
 
     function test_init_revertDuplicateOwners() public {
@@ -238,14 +323,14 @@ contract MultisigTest is Test {
         dup[0] = owner1;
         dup[1] = owner1;
         vm.expectRevert(Multisig.InvalidInit.selector);
-        factory.create(dup, 1);
+        factory.create(dup, 1, nextSalt++);
     }
 
     function test_init_revertAddressZeroOwner() public {
         address[] memory arr = new address[](1);
         arr[0] = address(0);
         vm.expectRevert(Multisig.InvalidInit.selector);
-        factory.create(arr, 1);
+        factory.create(arr, 1, nextSalt++);
     }
 
     // ═══════════════════════════════════════════

@@ -51,24 +51,26 @@ contract Multisig {
         bytes32[] calldata r,
         bytes32[] calldata s
     ) public payable {
-        bytes32 hash = keccak256(
-            abi.encodePacked(
-                "\x19\x01",
-                DOMAIN_SEPARATOR(),
-                keccak256(abi.encode(EXECUTE_TYPEHASH, to, value, keccak256(data), nonce++))
-            )
-        );
+        unchecked {
+            bytes32 hash = keccak256(
+                abi.encodePacked(
+                    "\x19\x01",
+                    DOMAIN_SEPARATOR(),
+                    keccak256(abi.encode(EXECUTE_TYPEHASH, to, value, keccak256(data), nonce++))
+                )
+            );
 
-        address prev;
-        uint256 _threshold = threshold;
-        for (uint256 i; i != _threshold; ++i) {
-            address signer = ecrecover(hash, v[i], r[i], s[i]);
-            require(isOwner[signer] && signer > prev, InvalidSig());
-            prev = signer;
+            address prev;
+            uint256 _threshold = threshold;
+            for (uint256 i; i != _threshold; ++i) {
+                address signer = ecrecover(hash, v[i], r[i], s[i]);
+                require(isOwner[signer] && signer > prev, InvalidSig());
+                prev = signer;
+            }
+
+            (bool ok,) = to.call{value: value}(data);
+            require(ok);
         }
-
-        (bool ok,) = to.call{value: value}(data);
-        require(ok);
     }
 
     function addOwner(address _owner) public payable onlySelf {

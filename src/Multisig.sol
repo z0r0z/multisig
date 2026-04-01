@@ -21,7 +21,8 @@ contract Multisig {
     function init(address[] calldata _owners, uint128 _threshold) public payable {
         uint256 len = _owners.length;
         require(threshold == 0, InvalidInit());
-        require(_threshold > 0 && _threshold <= len, InvalidInit());
+        require(_threshold != 0,  InvalidInit());
+        require(_threshold <= len, InvalidInit());
         threshold = _threshold;
         address prev;
         address owner;

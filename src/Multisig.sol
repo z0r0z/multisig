@@ -28,11 +28,19 @@ contract Multisig {
         threshold = _threshold;
         address prev;
         address owner;
+        bytes32 baseSlot;
+        assembly ("memory-safe") {
+            sstore(owners.slot, len)
+            mstore(0x00, owners.slot)
+            baseSlot := keccak256(0x00, 0x20)
+        }
         for (uint256 i; i != len; ++i) {
             owner = _owners[i];
             require(owner > prev, InvalidInit());
             isOwner[owner] = true;
-            owners.push(owner);
+            assembly ("memory-safe") {
+                sstore(add(baseSlot, i), owner)
+            }
             prev = owner;
         }
     }
@@ -49,14 +57,7 @@ contract Multisig {
         );
     }
 
-    function execute(
-        address to,
-        uint256 value,
-        bytes calldata data,
-        uint8[] calldata v,
-        bytes32[] calldata r,
-        bytes32[] calldata s
-    ) public payable {
+    function execute(address to, uint256 value, bytes calldata data, bytes calldata sigs) public payable {
         unchecked {
             bytes32 hash = keccak256(
                 abi.encodePacked(
@@ -66,11 +67,13 @@ contract Multisig {
                 )
             );
 
+            uint256 o;
             address prev;
             address signer;
             uint256 _threshold = threshold;
             for (uint256 i; i != _threshold; ++i) {
-                signer = ecrecover(hash, v[i], r[i], s[i]);
+                o = i * 65;
+                signer = ecrecover(hash, uint8(sigs[o + 64]), bytes32(sigs[o:o + 32]), bytes32(sigs[o + 32:o + 64]));
                 require(isOwner[signer], InvalidSig());
                 require(signer > prev, InvalidSig());
                 prev = signer;

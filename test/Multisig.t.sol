@@ -94,14 +94,19 @@ contract MultisigTest is Test {
     function _sign(Multisig w, address to, uint256 value, bytes memory data, uint256[] memory pks)
         internal
         view
-        returns (uint8[] memory v, bytes32[] memory r, bytes32[] memory s)
+        returns (bytes memory sigs)
     {
         bytes32 hash = _digest(w, to, value, data);
-        v = new uint8[](pks.length);
-        r = new bytes32[](pks.length);
-        s = new bytes32[](pks.length);
+        sigs = new bytes(pks.length * 65);
         for (uint256 i; i < pks.length; ++i) {
-            (v[i], r[i], s[i]) = vm.sign(pks[i], hash);
+            (uint8 vi, bytes32 ri, bytes32 si) = vm.sign(pks[i], hash);
+            uint256 o = i * 65;
+            assembly {
+                let ptr := add(add(sigs, 0x20), o)
+                mstore(ptr, ri)
+                mstore(add(ptr, 0x20), si)
+                mstore8(add(ptr, 0x40), vi)
+            }
         }
     }
 
@@ -185,8 +190,8 @@ contract MultisigTest is Test {
         // verify it works end-to-end: fund and execute
         vm.deal(address(wallet), 1 ether);
         address receiver = address(new Receiver());
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, receiver, 1 ether, "", _pks2());
-        wallet.execute(receiver, 1 ether, "", v, r, s);
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
         assertEq(receiver.balance, 1 ether);
     }
 
@@ -341,9 +346,9 @@ contract MultisigTest is Test {
         wallet = _deployFunded(2, 5 ether);
         address receiver = address(new Receiver());
 
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, receiver, 1 ether, "", _pks2());
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
 
-        wallet.execute(receiver, 1 ether, "", v, r, s);
+        wallet.execute(receiver, 1 ether, "", sigs);
         assertEq(receiver.balance, 1 ether);
         assertEq(address(wallet).balance, 4 ether);
         assertEq(wallet.nonce(), 1);
@@ -354,9 +359,9 @@ contract MultisigTest is Test {
         // call setThreshold on self
         bytes memory data = abi.encodeCall(Multisig.setThreshold, (1));
 
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, address(wallet), 0, data, _pks2());
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
 
-        wallet.execute(address(wallet), 0, data, v, r, s);
+        wallet.execute(address(wallet), 0, data, sigs);
         assertEq(wallet.threshold(), 1);
     }
 
@@ -364,9 +369,9 @@ contract MultisigTest is Test {
         wallet = _deployFunded(3, 1 ether);
         address receiver = address(new Receiver());
 
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, receiver, 1 ether, "", _pks3());
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks3());
 
-        wallet.execute(receiver, 1 ether, "", v, r, s);
+        wallet.execute(receiver, 1 ether, "", sigs);
         assertEq(receiver.balance, 1 ether);
     }
 
@@ -375,8 +380,8 @@ contract MultisigTest is Test {
         address receiver = address(new Receiver());
 
         for (uint256 i; i < 3; ++i) {
-            (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, receiver, 1 ether, "", _pks2());
-            wallet.execute(receiver, 1 ether, "", v, r, s);
+            bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+            wallet.execute(receiver, 1 ether, "", sigs);
             assertEq(wallet.nonce(), i + 1);
         }
     }
@@ -392,10 +397,10 @@ contract MultisigTest is Test {
         pks[1] = fakePk;
         pks = _sortedPKs(pks);
 
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, receiver, 1 ether, "", pks);
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", pks);
 
         vm.expectRevert(Multisig.InvalidSig.selector);
-        wallet.execute(receiver, 1 ether, "", v, r, s);
+        wallet.execute(receiver, 1 ether, "", sigs);
     }
 
     function test_execute_revertDuplicateSigner() public {
@@ -406,10 +411,10 @@ contract MultisigTest is Test {
         pks[0] = pk1;
         pks[1] = pk1; // same signer twice
 
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, receiver, 1 ether, "", pks);
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", pks);
 
         vm.expectRevert(Multisig.InvalidSig.selector);
-        wallet.execute(receiver, 1 ether, "", v, r, s);
+        wallet.execute(receiver, 1 ether, "", sigs);
     }
 
     function test_execute_revertWrongOrder() public {
@@ -421,33 +426,33 @@ contract MultisigTest is Test {
         // reverse
         (pks[0], pks[1]) = (pks[1], pks[0]);
 
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, receiver, 1 ether, "", pks);
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", pks);
 
         vm.expectRevert(Multisig.InvalidSig.selector);
-        wallet.execute(receiver, 1 ether, "", v, r, s);
+        wallet.execute(receiver, 1 ether, "", sigs);
     }
 
     function test_execute_revertReplayNonce() public {
         wallet = _deployFunded(2, 10 ether);
         address receiver = address(new Receiver());
 
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, receiver, 1 ether, "", _pks2());
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
 
-        wallet.execute(receiver, 1 ether, "", v, r, s);
+        wallet.execute(receiver, 1 ether, "", sigs);
 
         // same sigs, but nonce has advanced
         vm.expectRevert(Multisig.InvalidSig.selector);
-        wallet.execute(receiver, 1 ether, "", v, r, s);
+        wallet.execute(receiver, 1 ether, "", sigs);
     }
 
     function test_execute_revertCallFails() public {
         wallet = _deployFunded(2, 1 ether);
         address rev = address(new Reverter());
 
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, rev, 1 ether, "", _pks2());
+        bytes memory sigs = _sign(wallet, rev, 1 ether, "", _pks2());
 
         vm.expectRevert();
-        wallet.execute(rev, 1 ether, "", v, r, s);
+        wallet.execute(rev, 1 ether, "", sigs);
     }
 
     function test_execute_revertInsufficientSigs() public {
@@ -458,10 +463,10 @@ contract MultisigTest is Test {
         uint256[] memory pks = new uint256[](1);
         pks[0] = pk1;
 
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, receiver, 1 ether, "", pks);
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", pks);
 
         vm.expectRevert(); // out of bounds
-        wallet.execute(receiver, 1 ether, "", v, r, s);
+        wallet.execute(receiver, 1 ether, "", sigs);
     }
 
     function test_execute_threshold1() public {
@@ -475,10 +480,9 @@ contract MultisigTest is Test {
         else if (vm.addr(pk2) == sorted[0]) pk = pk2;
         else pk = pk3;
 
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) =
-            _sign(wallet, receiver, 1 ether, "", _pksSingle(pk));
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pksSingle(pk));
 
-        wallet.execute(receiver, 1 ether, "", v, r, s);
+        wallet.execute(receiver, 1 ether, "", sigs);
         assertEq(receiver.balance, 1 ether);
     }
 
@@ -491,9 +495,9 @@ contract MultisigTest is Test {
         address newOwner = address(0xBEEF);
 
         bytes memory data = abi.encodeCall(Multisig.addOwner, (newOwner));
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, address(wallet), 0, data, _pks2());
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
 
-        wallet.execute(address(wallet), 0, data, v, r, s);
+        wallet.execute(address(wallet), 0, data, sigs);
         assertTrue(wallet.isOwner(newOwner));
     }
 
@@ -508,20 +512,20 @@ contract MultisigTest is Test {
         address[] memory sorted = _sortedOwners();
 
         bytes memory data = abi.encodeCall(Multisig.addOwner, (sorted[0]));
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, address(wallet), 0, data, _pks2());
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
 
         vm.expectRevert(); // require(!isOwner[_owner])
-        wallet.execute(address(wallet), 0, data, v, r, s);
+        wallet.execute(address(wallet), 0, data, sigs);
     }
 
     function test_addOwner_revertAddressZero() public {
         wallet = _deploy(2);
 
         bytes memory data = abi.encodeCall(Multisig.addOwner, (address(0)));
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, address(wallet), 0, data, _pks2());
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
 
         vm.expectRevert(); // require(_owner != address(0))
-        wallet.execute(address(wallet), 0, data, v, r, s);
+        wallet.execute(address(wallet), 0, data, sigs);
     }
 
     function test_removeOwner() public {
@@ -529,9 +533,9 @@ contract MultisigTest is Test {
         address[] memory sorted = _sortedOwners();
 
         bytes memory data = abi.encodeCall(Multisig.removeOwner, (sorted[2]));
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, address(wallet), 0, data, _pks2());
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
 
-        wallet.execute(address(wallet), 0, data, v, r, s);
+        wallet.execute(address(wallet), 0, data, sigs);
         assertFalse(wallet.isOwner(sorted[2]));
     }
 
@@ -546,10 +550,10 @@ contract MultisigTest is Test {
         wallet = _deploy(2);
 
         bytes memory data = abi.encodeCall(Multisig.removeOwner, (address(0xDEAD)));
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, address(wallet), 0, data, _pks2());
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
 
         vm.expectRevert(); // require(isOwner[_owner])
-        wallet.execute(address(wallet), 0, data, v, r, s);
+        wallet.execute(address(wallet), 0, data, sigs);
     }
 
     function test_removeOwner_revertBelowThreshold() public {
@@ -558,19 +562,19 @@ contract MultisigTest is Test {
 
         // removing any owner would leave 2 owners < threshold 3
         bytes memory data = abi.encodeCall(Multisig.removeOwner, (sorted[0]));
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, address(wallet), 0, data, _pks3());
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks3());
 
         vm.expectRevert(); // require(owners.length >= threshold)
-        wallet.execute(address(wallet), 0, data, v, r, s);
+        wallet.execute(address(wallet), 0, data, sigs);
     }
 
     function test_setThreshold() public {
         wallet = _deploy(2);
 
         bytes memory data = abi.encodeCall(Multisig.setThreshold, (3));
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, address(wallet), 0, data, _pks2());
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
 
-        wallet.execute(address(wallet), 0, data, v, r, s);
+        wallet.execute(address(wallet), 0, data, sigs);
         assertEq(wallet.threshold(), 3);
     }
 
@@ -584,20 +588,20 @@ contract MultisigTest is Test {
         wallet = _deploy(2);
 
         bytes memory data = abi.encodeCall(Multisig.setThreshold, (0));
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, address(wallet), 0, data, _pks2());
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
 
         vm.expectRevert();
-        wallet.execute(address(wallet), 0, data, v, r, s);
+        wallet.execute(address(wallet), 0, data, sigs);
     }
 
     function test_setThreshold_revertTooHigh() public {
         wallet = _deploy(2);
 
         bytes memory data = abi.encodeCall(Multisig.setThreshold, (4));
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, address(wallet), 0, data, _pks2());
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
 
         vm.expectRevert();
-        wallet.execute(address(wallet), 0, data, v, r, s);
+        wallet.execute(address(wallet), 0, data, sigs);
     }
 
     // ═══════════════════════════════════════════
@@ -658,14 +662,14 @@ contract MultisigTest is Test {
 
         // add
         bytes memory data = abi.encodeCall(Multisig.addOwner, (newOwner));
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, address(wallet), 0, data, _pks2());
-        wallet.execute(address(wallet), 0, data, v, r, s);
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        wallet.execute(address(wallet), 0, data, sigs);
         assertTrue(wallet.isOwner(newOwner));
 
         // remove
         data = abi.encodeCall(Multisig.removeOwner, (newOwner));
-        (v, r, s) = _sign(wallet, address(wallet), 0, data, _pks2());
-        wallet.execute(address(wallet), 0, data, v, r, s);
+        sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        wallet.execute(address(wallet), 0, data, sigs);
         assertFalse(wallet.isOwner(newOwner));
     }
 
@@ -676,8 +680,8 @@ contract MultisigTest is Test {
 
         // lower threshold to 1
         bytes memory data = abi.encodeCall(Multisig.setThreshold, (1));
-        (uint8[] memory v, bytes32[] memory r, bytes32[] memory s) = _sign(wallet, address(wallet), 0, data, _pks2());
-        wallet.execute(address(wallet), 0, data, v, r, s);
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        wallet.execute(address(wallet), 0, data, sigs);
         assertEq(wallet.threshold(), 1);
 
         // now execute with single sig
@@ -686,8 +690,8 @@ contract MultisigTest is Test {
         else if (vm.addr(pk2) == sorted[0]) pk = pk2;
         else pk = pk3;
 
-        (v, r, s) = _sign(wallet, receiver, 1 ether, "", _pksSingle(pk));
-        wallet.execute(receiver, 1 ether, "", v, r, s);
+        sigs = _sign(wallet, receiver, 1 ether, "", _pksSingle(pk));
+        wallet.execute(receiver, 1 ether, "", sigs);
         assertEq(receiver.balance, 1 ether);
     }
 }

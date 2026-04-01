@@ -27,7 +27,7 @@ contract MultisigTest is Test {
     address owner3;
 
     // EIP-712
-    bytes32 constant EXECUTE_TYPEHASH = keccak256("Execute(address to,uint256 value,bytes data,uint256 nonce)");
+    bytes32 constant EXECUTE_TYPEHASH = keccak256("Execute(address to,uint256 value,bytes data,uint128 nonce)");
 
     function setUp() public {
         owner1 = vm.addr(pk1);
@@ -55,12 +55,12 @@ contract MultisigTest is Test {
         return arr;
     }
 
-    function _deploy(uint256 threshold) internal returns (Multisig) {
+    function _deploy(uint128 threshold) internal returns (Multisig) {
         address[] memory sorted = _sortedOwners();
         return Multisig(payable(factory.create(sorted, threshold)));
     }
 
-    function _deployFunded(uint256 threshold, uint256 amount) internal returns (Multisig) {
+    function _deployFunded(uint128 threshold, uint256 amount) internal returns (Multisig) {
         address[] memory sorted = _sortedOwners();
         vm.deal(address(this), amount);
         return Multisig(payable(factory.create{value: amount}(sorted, threshold)));

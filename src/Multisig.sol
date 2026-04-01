@@ -2,10 +2,10 @@
 pragma solidity ^0.8.34;
 
 contract Multisig {
-    uint256 public nonce;
-    uint256 public threshold;
+    uint128 public nonce;
+    uint128 public threshold;
     bytes32 public DOMAIN_SEPARATOR;
-    bytes32 constant EXECUTE_TYPEHASH = keccak256("Execute(address to,uint256 value,bytes data,uint256 nonce)");
+    bytes32 constant EXECUTE_TYPEHASH = keccak256("Execute(address to,uint256 value,bytes data,uint128 nonce)");
 
     address[] public owners;
     mapping(address => bool) public isOwner;
@@ -19,7 +19,7 @@ contract Multisig {
     error InvalidInit();
     error Unauthorized();
 
-    function init(address[] calldata _owners, uint256 _threshold) public payable {
+    function init(address[] calldata _owners, uint128 _threshold) public payable {
         require(threshold == 0, InvalidInit());
         require(_threshold > 0 && _threshold <= _owners.length, InvalidInit());
         threshold = _threshold;
@@ -93,7 +93,7 @@ contract Multisig {
         require(owners.length >= threshold);
     }
 
-    function setThreshold(uint256 _threshold) public payable onlySelf {
+    function setThreshold(uint128 _threshold) public payable onlySelf {
         require(_threshold > 0 && _threshold <= owners.length);
         threshold = _threshold;
     }
@@ -121,7 +121,7 @@ contract MultisigFactory {
         Multisig(payable(implementation)).init(lock, 1);
     }
 
-    function create(address[] calldata _owners, uint256 _threshold) public payable returns (address wallet) {
+    function create(address[] calldata _owners, uint128 _threshold) public payable returns (address wallet) {
         wallet = _clonePUSH0(implementation);
         Multisig(payable(wallet)).init{value: msg.value}(_owners, _threshold);
         emit Created(wallet);

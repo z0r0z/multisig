@@ -43,8 +43,6 @@ contract Multisig {
         );
     }
 
-    receive() external payable {}
-
     function execute(
         address to,
         uint256 value,
@@ -74,14 +72,14 @@ contract Multisig {
     }
 
     function addOwner(address _owner) public payable onlySelf {
-        require(!isOwner[_owner]);
+        require(!isOwner[_owner], Unauthorized());
         require(_owner != address(0), Unauthorized());
         isOwner[_owner] = true;
         owners.push(_owner);
     }
 
     function removeOwner(address _owner) public payable onlySelf {
-        require(isOwner[_owner]);
+        require(isOwner[_owner], Unauthorized());
         isOwner[_owner] = false;
         uint256 len = owners.length;
         for (uint256 i; i != len; ++i) {
@@ -97,16 +95,23 @@ contract Multisig {
     }
 
     function setThreshold(uint128 _threshold) public payable onlySelf {
-        require(_threshold > 0 && _threshold <= owners.length);
+        require(_threshold > 0 && _threshold <= owners.length, Unauthorized());
         threshold = _threshold;
     }
 
-    function onERC721Received(address, address, uint256, bytes calldata) public pure returns (bytes4) {
-        return this.onERC721Received.selector;
-    }
+    receive() external payable {}
 
-    function onERC1155Received(address, address, uint256, uint256, bytes calldata) public pure returns (bytes4) {
-        return this.onERC1155Received.selector;
+    fallback() external payable {
+        assembly ("memory-safe") {
+            let s := shr(224, calldataload(0))
+            // 0x150b7a02: `onERC721Received(address,address,uint256,bytes)`.
+            // 0xf23a6e61: `onERC1155Received(address,address,uint256,uint256,bytes)`.
+            // 0xbc197c81: `onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)`.
+            if or(eq(s, 0x150b7a02), or(eq(s, 0xf23a6e61), eq(s, 0xbc197c81))) {
+                mstore(0x20, s) // Load into memory slot.
+                return(0x3c, 0x20) // Return `msg.sig`.
+            }
+        }
     }
 }
 

@@ -529,14 +529,29 @@ contract MultisigTest is Test {
 
     function test_onERC721Received() public {
         wallet = _deploy(2);
-        bytes4 ret = wallet.onERC721Received(address(0), address(0), 0, "");
-        assertEq(ret, wallet.onERC721Received.selector);
+        bytes4 selector_ = bytes4(keccak256("onERC721Received(address,address,uint256,bytes)"));
+        (bool ok, bytes memory ret) =
+            address(wallet).call(abi.encodeWithSelector(selector_, address(0), address(0), uint256(0), ""));
+        assertTrue(ok);
+        assertEq(abi.decode(ret, (bytes4)), selector_);
     }
 
     function test_onERC1155Received() public {
         wallet = _deploy(2);
-        bytes4 ret = wallet.onERC1155Received(address(0), address(0), 0, 0, "");
-        assertEq(ret, wallet.onERC1155Received.selector);
+        bytes4 selector_ = bytes4(keccak256("onERC1155Received(address,address,uint256,uint256,bytes)"));
+        (bool ok, bytes memory ret) =
+            address(wallet).call(abi.encodeWithSelector(selector_, address(0), address(0), uint256(0), uint256(0), ""));
+        assertTrue(ok);
+        assertEq(abi.decode(ret, (bytes4)), selector_);
+    }
+
+    function test_onERC1155BatchReceived() public {
+        wallet = _deploy(2);
+        bytes4 selector_ = bytes4(keccak256("onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)"));
+        (bool ok, bytes memory ret) = address(wallet)
+            .call(abi.encodeWithSelector(selector_, address(0), address(0), new uint256[](0), new uint256[](0), ""));
+        assertTrue(ok);
+        assertEq(abi.decode(ret, (bytes4)), selector_);
     }
 
     // ═══════════════════════════════════════════

@@ -15,7 +15,7 @@ contract Multisig {
     uint128 public threshold;
 
     address[] owners;
-    mapping(address => bool) public isOwner;
+    mapping(address account => bool) public isOwner;
 
     modifier onlySelf() {
         require(msg.sender == address(this), Unauthorized());
@@ -23,12 +23,11 @@ contract Multisig {
     }
 
     function init(address[] calldata _owners, uint128 _threshold) public payable {
-        uint256 len = _owners.length;
-        require(threshold == 0 && _threshold != 0 && _threshold <= len, InvalidConfig());
+        require(threshold == 0 && _threshold != 0 && _threshold <= _owners.length, InvalidConfig());
         threshold = _threshold;
         address prev;
         address owner;
-        for (uint256 i; i != len; ++i) {
+        for (uint256 i; i != _owners.length; ++i) {
             owner = _owners[i];
             require(owner > prev, InvalidConfig());
             isOwner[owner] = true;
@@ -71,8 +70,8 @@ contract Multisig {
                 require(signer != address(0) && isOwner[signer] && signer > prev, InvalidSig());
                 prev = signer;
             }
+            return this.isValidSignature.selector;
         }
-        return this.isValidSignature.selector;
     }
 
     function execute(address to, uint256 value, bytes calldata data, bytes calldata sigs) public payable {
@@ -119,19 +118,19 @@ contract Multisig {
     }
 
     function removeOwner(address _owner) public payable onlySelf {
-        unchecked {
-            uint256 len = owners.length;
-            require(len > threshold && isOwner[_owner], InvalidConfig());
-            isOwner[_owner] = false;
-            for (uint256 i; i != len; ++i) {
+        uint256 len = owners.length;
+        require(len > threshold && isOwner[_owner], InvalidConfig());
+        isOwner[_owner] = false;
+        for (uint256 i; i != len; ++i) {
+            unchecked {
                 if (owners[i] == _owner) {
                     owners[i] = owners[len - 1];
                     owners.pop();
                     break;
                 }
             }
-            emit RemovedOwner(_owner);
         }
+        emit RemovedOwner(_owner);
     }
 
     function setThreshold(uint128 _threshold) public payable onlySelf {
@@ -171,7 +170,7 @@ contract MultisigFactory {
 
     /// @dev Create deterministic multisig wallet with PUSH0 and CREATE2.
     /// Adapted from Solady (https://github.com/vectorized/solady/blob/main/src/utils/LibClone.sol).
-    /// The salt must start with the zero address or the caller for front-running protection.
+    /// The salt must start with the zero address, or the caller, for front-running protection.
     function create(address[] calldata _owners, uint128 _threshold, uint256 salt)
         public
         payable

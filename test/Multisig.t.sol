@@ -14,6 +14,12 @@ contract Reverter {
     }
 }
 
+contract SetSlot {
+    function setThreshold(uint256 val) external {
+        assembly { sstore(0, val) }
+    }
+}
+
 contract MultisigTest is Test {
     MultisigFactory factory;
     Multisig wallet;
@@ -27,7 +33,7 @@ contract MultisigTest is Test {
     address owner3;
 
     // EIP-712
-    bytes32 constant EXECUTE_TYPEHASH = keccak256("Execute(address target,uint256 value,bytes data,uint64 nonce)");
+    bytes32 constant EXECUTE_TYPEHASH = keccak256("Execute(address target,uint256 value,bytes data,uint48 nonce)");
     bytes32 constant SAFE_MSG_TYPEHASH = keccak256("SafeMessage(bytes32 hash)");
 
     function setUp() public {
@@ -60,13 +66,32 @@ contract MultisigTest is Test {
 
     function _deploy(uint128 threshold) internal returns (Multisig) {
         address[] memory sorted = _sortedOwners();
-        return Multisig(payable(factory.create(sorted, 0, threshold, nextSalt++)));
+        return Multisig(payable(factory.create(sorted, 0, threshold, address(0), nextSalt++)));
+    }
+
+    function _deployWithDelay(uint128 threshold, uint32 _delay) internal returns (Multisig) {
+        address[] memory sorted = _sortedOwners();
+        return Multisig(payable(factory.create(sorted, _delay, threshold, address(0), nextSalt++)));
+    }
+
+    function _deployWithExecutor(uint128 threshold, address _executor) internal returns (Multisig) {
+        address[] memory sorted = _sortedOwners();
+        return Multisig(payable(factory.create(sorted, 0, threshold, _executor, nextSalt++)));
+    }
+
+    function _deployFull(uint128 threshold, uint32 _delay, address _executor, uint256 amount)
+        internal
+        returns (Multisig)
+    {
+        address[] memory sorted = _sortedOwners();
+        vm.deal(address(this), amount);
+        return Multisig(payable(factory.create{value: amount}(sorted, _delay, threshold, _executor, nextSalt++)));
     }
 
     function _deployFunded(uint128 threshold, uint256 amount) internal returns (Multisig) {
         address[] memory sorted = _sortedOwners();
         vm.deal(address(this), amount);
-        return Multisig(payable(factory.create{value: amount}(sorted, 0, threshold, nextSalt++)));
+        return Multisig(payable(factory.create{value: amount}(sorted, 0, threshold, address(0), nextSalt++)));
     }
 
     function _domainSeparator(address walletAddr) internal view returns (bytes32) {
@@ -180,8 +205,8 @@ contract MultisigTest is Test {
 
     function test_factory_cloneIsDistinct() public {
         address[] memory sorted = _sortedOwners();
-        address w1 = factory.create(sorted, 0, 2, nextSalt++);
-        address w2 = factory.create(sorted, 0, 2, nextSalt++);
+        address w1 = factory.create(sorted, 0, 2, address(0), nextSalt++);
+        address w2 = factory.create(sorted, 0, 2, address(0), nextSalt++);
         assertTrue(w1 != w2);
         assertTrue(w1 != factory.implementation());
         assertTrue(w2 != factory.implementation());
@@ -206,31 +231,31 @@ contract MultisigTest is Test {
         address[] memory sorted = _sortedOwners();
         vm.expectEmit(false, false, false, false);
         emit MultisigFactory.Created(address(0)); // we don't know the address yet
-        factory.create(sorted, 0, 2, nextSalt++);
+        factory.create(sorted, 0, 2, address(0), nextSalt++);
     }
 
     function test_factory_deterministicAddress() public {
         address[] memory sorted = _sortedOwners();
         uint256 salt = 0xCAFE;
-        address w1 = factory.create(sorted, 0, 2, salt);
+        address w1 = factory.create(sorted, 0, 2, address(0), salt);
         // deploy on a fresh factory with the same salt to verify determinism
         MultisigFactory factory2 = new MultisigFactory();
         // different factory => different address (factory address is part of CREATE2)
-        address w2 = factory2.create(sorted, 0, 2, salt);
+        address w2 = factory2.create(sorted, 0, 2, address(0), salt);
         assertTrue(w1 != w2);
     }
 
     function test_factory_revertDuplicateSalt() public {
         address[] memory sorted = _sortedOwners();
         uint256 salt = 0xDEAD;
-        factory.create(sorted, 0, 2, salt);
+        factory.create(sorted, 0, 2, address(0), salt);
         vm.expectRevert(MultisigFactory.DeploymentFailed.selector);
-        factory.create(sorted, 0, 2, salt);
+        factory.create(sorted, 0, 2, address(0), salt);
     }
 
     function test_factory_createWithZeroSalt() public {
         address[] memory sorted = _sortedOwners();
-        address w = factory.create(sorted, 0, 2, 0);
+        address w = factory.create(sorted, 0, 2, address(0), 0);
         assertTrue(w != address(0));
         assertEq(Multisig(payable(w)).threshold(), 2);
     }
@@ -238,14 +263,14 @@ contract MultisigTest is Test {
     function test_factory_createWithCallerPrefixedSalt() public {
         address[] memory sorted = _sortedOwners();
         uint256 salt = uint256(uint160(address(this))) << 96;
-        address w = factory.create(sorted, 0, 2, salt);
+        address w = factory.create(sorted, 0, 2, address(0), salt);
         assertTrue(w != address(0));
     }
 
     function test_factory_createWithCallerPrefixedSaltAndNonce() public {
         address[] memory sorted = _sortedOwners();
         uint256 salt = (uint256(uint160(address(this))) << 96) | 0x42;
-        address w = factory.create(sorted, 0, 2, salt);
+        address w = factory.create(sorted, 0, 2, address(0), salt);
         assertTrue(w != address(0));
     }
 
@@ -254,7 +279,7 @@ contract MultisigTest is Test {
         // Salt prefixed with a different address
         uint256 salt = uint256(uint160(address(0xBEEF))) << 96;
         vm.expectRevert(MultisigFactory.SaltDoesNotStartWith.selector);
-        factory.create(sorted, 0, 2, salt);
+        factory.create(sorted, 0, 2, address(0), salt);
     }
 
     function test_factory_saltCallerEnforcedPerSender() public {
@@ -266,17 +291,17 @@ contract MultisigTest is Test {
 
         // caller1 can use their own prefix
         vm.prank(caller1);
-        address w1 = factory.create(sorted, 0, 2, salt1);
+        address w1 = factory.create(sorted, 0, 2, address(0), salt1);
         assertTrue(w1 != address(0));
 
         // caller2 cannot use caller1's prefix
         vm.prank(caller2);
         vm.expectRevert(MultisigFactory.SaltDoesNotStartWith.selector);
-        factory.create(sorted, 0, 2, salt1);
+        factory.create(sorted, 0, 2, address(0), salt1);
 
         // caller2 can use their own prefix
         vm.prank(caller2);
-        address w2 = factory.create(sorted, 0, 2, salt2);
+        address w2 = factory.create(sorted, 0, 2, address(0), salt2);
         assertTrue(w2 != address(0));
     }
 
@@ -284,11 +309,11 @@ contract MultisigTest is Test {
         address[] memory sorted = _sortedOwners();
         // Any caller can use zero-prefixed salts
         vm.prank(address(0xA1));
-        address w1 = factory.create(sorted, 0, 2, 0x1);
+        address w1 = factory.create(sorted, 0, 2, address(0), 0x1);
         assertTrue(w1 != address(0));
 
         vm.prank(address(0xA2));
-        address w2 = factory.create(sorted, 0, 2, 0x2);
+        address w2 = factory.create(sorted, 0, 2, address(0), 0x2);
         assertTrue(w2 != address(0));
     }
 
@@ -307,19 +332,19 @@ contract MultisigTest is Test {
         wallet = _deploy(2);
         address[] memory sorted = _sortedOwners();
         vm.expectRevert(Multisig.Unauthorized.selector);
-        wallet.init(sorted, 0, 2);
+        wallet.init(sorted, 0, 2, address(0));
     }
 
     function test_init_revertThresholdZero() public {
         address[] memory sorted = _sortedOwners();
         vm.expectRevert(Multisig.InvalidConfig.selector);
-        factory.create(sorted, 0, 0, nextSalt++);
+        factory.create(sorted, 0, 0, address(0), nextSalt++);
     }
 
     function test_init_revertThresholdTooHigh() public {
         address[] memory sorted = _sortedOwners();
         vm.expectRevert(Multisig.InvalidConfig.selector);
-        factory.create(sorted, 0, 4, nextSalt++);
+        factory.create(sorted, 0, 4, address(0), nextSalt++);
     }
 
     function test_init_revertUnsortedOwners() public {
@@ -327,7 +352,7 @@ contract MultisigTest is Test {
         // swap first two to break sort
         (sorted[0], sorted[1]) = (sorted[1], sorted[0]);
         vm.expectRevert(Multisig.InvalidConfig.selector);
-        factory.create(sorted, 0, 2, nextSalt++);
+        factory.create(sorted, 0, 2, address(0), nextSalt++);
     }
 
     function test_init_revertDuplicateOwners() public {
@@ -335,14 +360,14 @@ contract MultisigTest is Test {
         dup[0] = owner1;
         dup[1] = owner1;
         vm.expectRevert(Multisig.InvalidConfig.selector);
-        factory.create(dup, 0, 1, nextSalt++);
+        factory.create(dup, 0, 1, address(0), nextSalt++);
     }
 
     function test_init_revertAddressZeroOwner() public {
         address[] memory arr = new address[](1);
         arr[0] = address(0);
         vm.expectRevert(Multisig.InvalidConfig.selector);
-        factory.create(arr, 0, 1, nextSalt++);
+        factory.create(arr, 0, 1, address(0), nextSalt++);
     }
 
     // ═══════════════════════════════════════════
@@ -804,7 +829,7 @@ contract MultisigTest is Test {
     }
 
     function test_executeTypeHash() public pure {
-        assertEq(keccak256("Execute(address target,uint256 value,bytes data,uint64 nonce)"), EXECUTE_TYPEHASH);
+        assertEq(keccak256("Execute(address target,uint256 value,bytes data,uint48 nonce)"), EXECUTE_TYPEHASH);
     }
 
     function test_safeMessageTypeHash() public pure {
@@ -881,6 +906,551 @@ contract MultisigTest is Test {
         bytes32 hash = keccak256("test message");
         // 65 zero bytes → ecrecover returns address(0)
         bytes memory sigs = new bytes(65);
+        vm.expectRevert(Multisig.InvalidSig.selector);
+        wallet.isValidSignature(hash, sigs);
+    }
+
+    // ═══════════════════════════════════════════
+    //            EXECUTOR TESTS
+    // ═══════════════════════════════════════════
+
+    function test_executor_setAtInit() public {
+        address exec = address(0xEEEE);
+        wallet = _deployWithExecutor(2, exec);
+        assertEq(wallet.executor(), exec);
+    }
+
+    function test_executor_bypassesSigs() public {
+        address exec = address(0xEEEE);
+        wallet = _deployWithExecutor(2, exec);
+        vm.deal(address(wallet), 1 ether);
+        address receiver = address(new Receiver());
+
+        vm.prank(exec);
+        wallet.execute(receiver, 1 ether, "", "");
+        assertEq(receiver.balance, 1 ether);
+    }
+
+    function test_executor_bypassesDelay() public {
+        address exec = address(0xEEEE);
+        wallet = _deployFull(2, 1 days, exec, 1 ether);
+        address receiver = address(new Receiver());
+
+        // executor executes immediately despite delay
+        vm.prank(exec);
+        wallet.execute(receiver, 1 ether, "", "");
+        assertEq(receiver.balance, 1 ether);
+    }
+
+    function test_executor_ownersStillTimelocked() public {
+        address exec = address(0xEEEE);
+        wallet = _deployFull(2, 1 days, exec, 1 ether);
+        address receiver = address(new Receiver());
+
+        // owners go through timelock
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+
+        // ETH stays — tx was queued, not executed
+        assertEq(receiver.balance, 0);
+        assertEq(address(wallet).balance, 1 ether);
+    }
+
+    function test_executor_nonExecutorCannotBypassSigs() public {
+        address exec = address(0xEEEE);
+        wallet = _deployWithExecutor(2, exec);
+        vm.deal(address(wallet), 1 ether);
+        address receiver = address(new Receiver());
+
+        // random caller with no sigs
+        vm.prank(address(0xDEAD));
+        vm.expectRevert(Multisig.InvalidSig.selector);
+        wallet.execute(receiver, 1 ether, "", "");
+    }
+
+    function test_executor_setExecutor() public {
+        wallet = _deploy(2);
+        address exec = address(0xEEEE);
+
+        bytes memory data = abi.encodeCall(Multisig.setExecutor, (exec));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        wallet.execute(address(wallet), 0, data, sigs);
+
+        assertEq(wallet.executor(), exec);
+    }
+
+    function test_executor_revokeExecutor() public {
+        address exec = address(0xEEEE);
+        wallet = _deployWithExecutor(2, exec);
+
+        bytes memory data = abi.encodeCall(Multisig.setExecutor, (address(0)));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        wallet.execute(address(wallet), 0, data, sigs);
+
+        assertEq(wallet.executor(), address(0));
+
+        // executor can no longer bypass
+        vm.deal(address(wallet), 1 ether);
+        address receiver = address(new Receiver());
+        vm.prank(exec);
+        vm.expectRevert(Multisig.InvalidSig.selector);
+        wallet.execute(receiver, 1 ether, "", "");
+    }
+
+    function test_executor_callWithData() public {
+        address exec = address(0xEEEE);
+        wallet = _deployWithExecutor(2, exec);
+
+        bytes memory data = abi.encodeCall(Multisig.setThreshold, (1));
+        vm.prank(exec);
+        wallet.execute(address(wallet), 0, data, "");
+        assertEq(wallet.threshold(), 1);
+    }
+
+    function test_executor_setExecutorRevertNotSelf() public {
+        wallet = _deploy(2);
+        vm.expectRevert(Multisig.Unauthorized.selector);
+        wallet.setExecutor(address(0xEEEE));
+    }
+
+    // ═══════════════════════════════════════════
+    //              BATCH TESTS
+    // ═══════════════════════════════════════════
+
+    function test_batch_viaExecute() public {
+        wallet = _deploy(2);
+        address newOwner = address(0xBEEF);
+
+        address[] memory targets = new address[](2);
+        uint256[] memory values = new uint256[](2);
+        bytes[] memory datas = new bytes[](2);
+
+        targets[0] = address(wallet);
+        targets[1] = address(wallet);
+        datas[0] = abi.encodeCall(Multisig.addOwner, (newOwner));
+        datas[1] = abi.encodeCall(Multisig.setThreshold, (3));
+
+        bytes memory batchData = abi.encodeCall(Multisig.batch, (targets, values, datas));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, batchData, _pks2());
+
+        wallet.execute(address(wallet), 0, batchData, sigs);
+        assertTrue(wallet.isOwner(newOwner));
+        assertEq(wallet.threshold(), 3);
+    }
+
+    function test_batch_revertNotSelf() public {
+        wallet = _deploy(2);
+
+        address[] memory targets = new address[](1);
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory datas = new bytes[](1);
+        targets[0] = address(wallet);
+        datas[0] = abi.encodeCall(Multisig.setThreshold, (1));
+
+        vm.expectRevert(Multisig.Unauthorized.selector);
+        wallet.batch(targets, values, datas);
+    }
+
+    function test_batch_withValues() public {
+        wallet = _deploy(2);
+        vm.deal(address(wallet), 3 ether);
+        address r1 = address(new Receiver());
+        address r2 = address(new Receiver());
+
+        address[] memory targets = new address[](2);
+        uint256[] memory values = new uint256[](2);
+        bytes[] memory datas = new bytes[](2);
+
+        targets[0] = r1;
+        targets[1] = r2;
+        values[0] = 1 ether;
+        values[1] = 2 ether;
+
+        bytes memory batchData = abi.encodeCall(Multisig.batch, (targets, values, datas));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, batchData, _pks2());
+
+        wallet.execute(address(wallet), 0, batchData, sigs);
+        assertEq(r1.balance, 1 ether);
+        assertEq(r2.balance, 2 ether);
+    }
+
+    function test_batch_revertInnerCallFails() public {
+        wallet = _deploy(2);
+        address rev = address(new Reverter());
+
+        address[] memory targets = new address[](1);
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory datas = new bytes[](1);
+        targets[0] = rev;
+
+        bytes memory batchData = abi.encodeCall(Multisig.batch, (targets, values, datas));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, batchData, _pks2());
+
+        vm.expectRevert(bytes("nope"));
+        wallet.execute(address(wallet), 0, batchData, sigs);
+    }
+
+    // ═══════════════════════════════════════════
+    //           TIMELOCK TESTS (FACTORY)
+    // ═══════════════════════════════════════════
+
+    function test_timelock_initWithDelay() public {
+        wallet = _deployWithDelay(2, 1 days);
+        assertEq(wallet.delay(), 1 days);
+    }
+
+    function test_timelock_queuesWhenDelaySet() public {
+        wallet = _deployWithDelay(2, 1 days);
+        vm.deal(address(wallet), 1 ether);
+        address receiver = address(new Receiver());
+
+        uint48 n = wallet.nonce();
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+
+        assertEq(receiver.balance, 0);
+        assertEq(wallet.nonce(), n + 1);
+    }
+
+    function test_timelock_executeQueuedAfterDelay() public {
+        wallet = _deployWithDelay(2, 1 days);
+        vm.deal(address(wallet), 1 ether);
+        address receiver = address(new Receiver());
+
+        uint48 n = wallet.nonce();
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+
+        vm.warp(block.timestamp + 1 days);
+        wallet.executeQueued(receiver, 1 ether, "", n);
+        assertEq(receiver.balance, 1 ether);
+    }
+
+    function test_timelock_revertTooEarly() public {
+        wallet = _deployWithDelay(2, 1 days);
+        vm.deal(address(wallet), 1 ether);
+        address receiver = address(new Receiver());
+
+        uint48 n = wallet.nonce();
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+
+        vm.warp(block.timestamp + 1 days - 1);
+        vm.expectRevert(abi.encodeWithSelector(Multisig.NotReady.selector, block.timestamp + 1));
+        wallet.executeQueued(receiver, 1 ether, "", n);
+    }
+
+    function test_timelock_revertNotQueued() public {
+        wallet = _deployWithDelay(2, 1 days);
+        vm.expectRevert(abi.encodeWithSelector(Multisig.NotReady.selector, 0));
+        wallet.executeQueued(address(0xBEEF), 0, "", 0);
+    }
+
+    function test_timelock_revertReplay() public {
+        wallet = _deployWithDelay(2, 1 days);
+        vm.deal(address(wallet), 2 ether);
+        address receiver = address(new Receiver());
+
+        uint48 n = wallet.nonce();
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+
+        vm.warp(block.timestamp + 1 days);
+        wallet.executeQueued(receiver, 1 ether, "", n);
+
+        vm.expectRevert(abi.encodeWithSelector(Multisig.NotReady.selector, 0));
+        wallet.executeQueued(receiver, 1 ether, "", n);
+    }
+
+    function test_timelock_setDelay() public {
+        wallet = _deploy(2);
+
+        bytes memory data = abi.encodeCall(Multisig.setDelay, (7 days));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        wallet.execute(address(wallet), 0, data, sigs);
+
+        assertEq(wallet.delay(), 7 days);
+    }
+
+    function test_timelock_setDelayRevertNotSelf() public {
+        wallet = _deploy(2);
+        vm.expectRevert(Multisig.Unauthorized.selector);
+        wallet.setDelay(1 days);
+    }
+
+    function test_timelock_executeQueuedRevertCallFails() public {
+        wallet = _deployWithDelay(2, 1 days);
+        vm.deal(address(wallet), 1 ether);
+        address rev = address(new Reverter());
+
+        uint48 n = wallet.nonce();
+        bytes memory sigs = _sign(wallet, rev, 1 ether, "", _pks2());
+        wallet.execute(rev, 1 ether, "", sigs);
+
+        vm.warp(block.timestamp + 1 days);
+        vm.expectRevert(bytes("nope"));
+        wallet.executeQueued(rev, 1 ether, "", n);
+    }
+
+    function test_timelock_executeQueuedWithData() public {
+        wallet = _deployWithDelay(2, 1 days);
+
+        bytes memory data = abi.encodeCall(Multisig.setThreshold, (1));
+        uint48 n = wallet.nonce();
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        wallet.execute(address(wallet), 0, data, sigs);
+
+        vm.warp(block.timestamp + 1 days);
+        wallet.executeQueued(address(wallet), 0, data, n);
+        assertEq(wallet.threshold(), 1);
+    }
+
+    function test_timelock_initWithDelayAndExecutor() public {
+        address exec = address(0xEEEE);
+        wallet = _deployFull(2, 1 days, exec, 0);
+        assertEq(wallet.delay(), 1 days);
+        assertEq(wallet.executor(), exec);
+    }
+
+    function test_timelock_executeQueuedPermissionless() public {
+        wallet = _deployWithDelay(2, 1 days);
+        vm.deal(address(wallet), 1 ether);
+        address receiver = address(new Receiver());
+
+        uint48 n = wallet.nonce();
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(address(0xCAFE));
+        wallet.executeQueued(receiver, 1 ether, "", n);
+        assertEq(receiver.balance, 1 ether);
+    }
+
+    // ═══════════════════════════════════════════
+    //           DELEGATECALL TESTS
+    // ═══════════════════════════════════════════
+
+    function test_delegateCall_viaExecute() public {
+        wallet = _deploy(2);
+        SetSlot impl = new SetSlot();
+
+        // delegatecall SetSlot.setThreshold — writes to wallet's storage
+        bytes memory innerData = abi.encodeCall(SetSlot.setThreshold, (42));
+        bytes memory data = abi.encodeCall(Multisig.delegateCall, (address(impl), innerData));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+
+        wallet.execute(address(wallet), 0, data, sigs);
+        // slot 0 packs delay/nonce/threshold/executor — threshold is at bits 80..95
+        // but SetSlot writes raw uint256 to slot 0, overwriting everything
+        // just verify the call succeeded by checking slot 0 changed
+        assertEq(uint256(vm.load(address(wallet), bytes32(0))), 42);
+    }
+
+    function test_delegateCall_revertNotSelf() public {
+        wallet = _deploy(2);
+        vm.expectRevert(Multisig.Unauthorized.selector);
+        wallet.delegateCall(address(0xBEEF), "");
+    }
+
+    function test_delegateCall_revertInnerCallFails() public {
+        wallet = _deploy(2);
+        address rev = address(new Reverter());
+
+        bytes memory data = abi.encodeCall(Multisig.delegateCall, (rev, ""));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+
+        vm.expectRevert(bytes("nope"));
+        wallet.execute(address(wallet), 0, data, sigs);
+    }
+
+    // ═══════════════════════════════════════════
+    //              EVENT TESTS
+    // ═══════════════════════════════════════════
+
+    function test_event_executionSuccess() public {
+        wallet = _deployFunded(2, 1 ether);
+        address receiver = address(new Receiver());
+
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+
+        vm.expectEmit(false, false, false, false);
+        emit Multisig.ExecutionSuccess(bytes32(0), 0);
+        wallet.execute(receiver, 1 ether, "", sigs);
+    }
+
+    function test_event_queued() public {
+        wallet = _deployWithDelay(2, 1 days);
+        vm.deal(address(wallet), 1 ether);
+        address receiver = address(new Receiver());
+
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+
+        vm.expectEmit(false, false, false, true);
+        emit Multisig.Queued(bytes32(0), 0, block.timestamp + 1 days);
+        wallet.execute(receiver, 1 ether, "", sigs);
+    }
+
+    function test_event_executionSuccessQueued() public {
+        wallet = _deployWithDelay(2, 1 days);
+        vm.deal(address(wallet), 1 ether);
+        address receiver = address(new Receiver());
+
+        uint48 n = wallet.nonce();
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+
+        vm.warp(block.timestamp + 1 days);
+
+        vm.expectEmit(false, false, false, true);
+        emit Multisig.ExecutionSuccess(bytes32(0), n);
+        wallet.executeQueued(receiver, 1 ether, "", n);
+    }
+
+    function test_event_addedOwner() public {
+        wallet = _deploy(2);
+        address newOwner = address(0xBEEF);
+
+        bytes memory data = abi.encodeCall(Multisig.addOwner, (newOwner));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+
+        vm.expectEmit(true, false, false, false);
+        emit Multisig.AddedOwner(newOwner);
+        wallet.execute(address(wallet), 0, data, sigs);
+    }
+
+    function test_event_removedOwner() public {
+        wallet = _deploy(2);
+        address[] memory sorted = _sortedOwners();
+
+        bytes memory data = abi.encodeCall(Multisig.removeOwner, (sorted[2]));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+
+        vm.expectEmit(true, false, false, false);
+        emit Multisig.RemovedOwner(sorted[2]);
+        wallet.execute(address(wallet), 0, data, sigs);
+    }
+
+    function test_event_changedThreshold() public {
+        wallet = _deploy(2);
+
+        bytes memory data = abi.encodeCall(Multisig.setThreshold, (3));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+
+        vm.expectEmit(false, false, false, true);
+        emit Multisig.ChangedThreshold(3);
+        wallet.execute(address(wallet), 0, data, sigs);
+    }
+
+    function test_event_changedDelay() public {
+        wallet = _deploy(2);
+
+        bytes memory data = abi.encodeCall(Multisig.setDelay, (7 days));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+
+        vm.expectEmit(false, false, false, true);
+        emit Multisig.ChangedDelay(7 days);
+        wallet.execute(address(wallet), 0, data, sigs);
+    }
+
+    function test_event_changedExecutor() public {
+        wallet = _deploy(2);
+        address exec = address(0xEEEE);
+
+        bytes memory data = abi.encodeCall(Multisig.setExecutor, (exec));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+
+        vm.expectEmit(true, false, false, false);
+        emit Multisig.ChangedExecutor(exec);
+        wallet.execute(address(wallet), 0, data, sigs);
+    }
+
+    // ═══════════════════════════════════════════
+    //              FUZZ TESTS
+    // ═══════════════════════════════════════════
+
+    function testFuzz_init_revertInvalidThreshold(uint256 _threshold) public {
+        address[] memory sorted = _sortedOwners();
+        vm.assume(_threshold == 0 || _threshold > sorted.length);
+        vm.expectRevert(Multisig.InvalidConfig.selector);
+        factory.create(sorted, 0, _threshold, address(0), nextSalt++);
+    }
+
+    function testFuzz_init_validThreshold(uint256 _threshold) public {
+        address[] memory sorted = _sortedOwners();
+        _threshold = bound(_threshold, 1, sorted.length);
+        Multisig w = Multisig(payable(factory.create(sorted, 0, _threshold, address(0), nextSalt++)));
+        assertEq(w.threshold(), _threshold);
+        assertEq(w.getOwners().length, sorted.length);
+        for (uint256 i; i < sorted.length; ++i) {
+            assertTrue(w.isOwner(sorted[i]));
+        }
+    }
+
+    function testFuzz_removeOwner_arrayIntegrity(uint256 indexSeed) public {
+        // deploy with threshold=1 so any single owner can sign
+        wallet = _deploy(1);
+        address[] memory sorted = _sortedOwners();
+        uint256 idx = indexSeed % sorted.length;
+        address toRemove = sorted[idx];
+
+        // find the lowest-addressed owner that is NOT the one being removed
+        address[] memory sortedAll = _sortedOwners();
+        uint256 signerPk;
+        for (uint256 i; i < sortedAll.length; ++i) {
+            if (sortedAll[i] != toRemove) {
+                if (vm.addr(pk1) == sortedAll[i]) signerPk = pk1;
+                else if (vm.addr(pk2) == sortedAll[i]) signerPk = pk2;
+                else signerPk = pk3;
+                break;
+            }
+        }
+
+        bytes memory data = abi.encodeCall(Multisig.removeOwner, (toRemove));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pksSingle(signerPk));
+        wallet.execute(address(wallet), 0, data, sigs);
+
+        assertFalse(wallet.isOwner(toRemove));
+        address[] memory remaining = wallet.getOwners();
+        assertEq(remaining.length, sorted.length - 1);
+        for (uint256 i; i < remaining.length; ++i) {
+            assertTrue(wallet.isOwner(remaining[i]));
+            assertTrue(remaining[i] != toRemove);
+        }
+    }
+
+    function testFuzz_factory_saltAccessControl(address caller, uint256 salt) public {
+        address[] memory sorted = _sortedOwners();
+        address prefix = address(uint160(salt >> 96));
+        if (prefix != address(0) && prefix != caller) {
+            vm.prank(caller);
+            vm.expectRevert(MultisigFactory.SaltDoesNotStartWith.selector);
+            factory.create(sorted, 0, 2, address(0), salt);
+        } else {
+            vm.prank(caller);
+            address w = factory.create(sorted, 0, 2, address(0), salt);
+            assertTrue(w != address(0));
+        }
+    }
+
+    function testFuzz_execute_revertBadSigsLength(uint256 sigsLen) public {
+        wallet = _deployFunded(2, 1 ether);
+        address receiver = address(new Receiver());
+        uint256 expectedLen = uint256(wallet.threshold()) * 65;
+        vm.assume(sigsLen != expectedLen);
+        sigsLen = bound(sigsLen, 0, 500);
+        bytes memory sigs = new bytes(sigsLen);
+        vm.expectRevert();
+        wallet.execute(receiver, 1 ether, "", sigs);
+    }
+
+    function testFuzz_isValidSignature_revertBadSigsLength(uint256 sigsLen) public {
+        wallet = _deploy(2);
+        bytes32 hash = keccak256("test message");
+        uint256 expectedLen = uint256(wallet.threshold()) * 65;
+        vm.assume(sigsLen != expectedLen);
+        sigsLen = bound(sigsLen, 0, 500);
+        bytes memory sigs = new bytes(sigsLen);
         vm.expectRevert(Multisig.InvalidSig.selector);
         wallet.isValidSignature(hash, sigs);
     }

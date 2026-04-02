@@ -8,6 +8,18 @@ contract Receiver {
     fallback() external payable {}
 }
 
+contract Reverter7702 {
+    fallback() external payable {
+        revert("nope");
+    }
+}
+
+contract SetSlot7702 {
+    function setSlot(uint256 val) external {
+        assembly { sstore(0, val) }
+    }
+}
+
 contract EIP7702Test is Test {
     Multisig implementation;
 
@@ -22,7 +34,7 @@ contract EIP7702Test is Test {
     address owner2;
     address owner3;
 
-    bytes32 constant EXECUTE_TYPEHASH = keccak256("Execute(address target,uint256 value,bytes data,uint64 nonce)");
+    bytes32 constant EXECUTE_TYPEHASH = keccak256("Execute(address target,uint256 value,bytes data,uint48 nonce)");
     bytes32 constant SAFE_MSG_TYPEHASH = keccak256("SafeMessage(bytes32 hash)");
 
     function setUp() public {
@@ -120,11 +132,15 @@ contract EIP7702Test is Test {
     }
 
     /// @dev Delegate the EOA to the Multisig implementation and call init.
-    function _delegateAndInit(uint64 thresholdVal) internal {
+    function _delegateAndInit(uint16 thresholdVal) internal {
+        _delegateAndInitFull(thresholdVal, 0, address(0));
+    }
+
+    function _delegateAndInitFull(uint16 thresholdVal, uint32 _delay, address _executor) internal {
         Vm.SignedDelegation memory sd = vm.signDelegation(address(implementation), eoaPk);
         vm.attachDelegation(sd);
         vm.prank(eoa);
-        Multisig(payable(eoa)).init(_sortedOwners(), 0, thresholdVal);
+        Multisig(payable(eoa)).init(_sortedOwners(), _delay, thresholdVal, _executor);
     }
 
     // ═══════════════════════════════════════════
@@ -156,7 +172,7 @@ contract EIP7702Test is Test {
 
         vm.prank(eoa);
         vm.expectRevert(Multisig.InvalidConfig.selector);
-        Multisig(payable(eoa)).init(_sortedOwners(), 0, 2);
+        Multisig(payable(eoa)).init(_sortedOwners(), 0, 2, address(0));
     }
 
     // ═══════════════════════════════════════════
@@ -326,7 +342,7 @@ contract EIP7702Test is Test {
     //           TIMELOCK TESTS
     // ═══════════════════════════════════════════
 
-    function _delegateInitAndSetDelay(uint64 _delay) internal {
+    function _delegateInitAndSetDelay(uint32 _delay) internal {
         _delegateAndInit(2);
         vm.prank(eoa);
         Multisig(payable(eoa)).setDelay(_delay);
@@ -338,7 +354,7 @@ contract EIP7702Test is Test {
         vm.deal(eoa, 1 ether);
         address receiver = address(new Receiver());
 
-        uint64 nonceAtQueue = wallet.nonce();
+        uint48 nonceAtQueue = wallet.nonce();
         bytes memory sigs = _sign(eoa, receiver, 1 ether, "", _pks2());
 
         vm.expectEmit(false, false, false, true);
@@ -356,7 +372,7 @@ contract EIP7702Test is Test {
         vm.deal(eoa, 1 ether);
         address receiver = address(new Receiver());
 
-        uint64 nonceAtQueue = wallet.nonce();
+        uint48 nonceAtQueue = wallet.nonce();
         bytes memory sigs = _sign(eoa, receiver, 1 ether, "", _pks2());
         wallet.execute(receiver, 1 ether, "", sigs);
 
@@ -373,7 +389,7 @@ contract EIP7702Test is Test {
         vm.deal(eoa, 1 ether);
         address receiver = address(new Receiver());
 
-        uint64 nonceAtQueue = wallet.nonce();
+        uint48 nonceAtQueue = wallet.nonce();
         bytes memory sigs = _sign(eoa, receiver, 1 ether, "", _pks2());
         wallet.execute(receiver, 1 ether, "", sigs);
 
@@ -397,7 +413,7 @@ contract EIP7702Test is Test {
         vm.deal(eoa, 2 ether);
         address receiver = address(new Receiver());
 
-        uint64 n = wallet.nonce();
+        uint48 n = wallet.nonce();
         bytes memory sigs = _sign(eoa, receiver, 1 ether, "", _pks2());
         wallet.execute(receiver, 1 ether, "", sigs);
 
@@ -450,7 +466,7 @@ contract EIP7702Test is Test {
         vm.deal(eoa, 1 ether);
         address receiver = address(new Receiver());
 
-        uint64 n = wallet.nonce();
+        uint48 n = wallet.nonce();
         bytes memory sigs = _sign(eoa, receiver, 1 ether, "", _pks2());
         wallet.execute(receiver, 1 ether, "", sigs);
 
@@ -460,5 +476,139 @@ contract EIP7702Test is Test {
         vm.prank(address(0xCAFE));
         wallet.executeQueued(receiver, 1 ether, "", n);
         assertEq(receiver.balance, 1 ether);
+    }
+
+    // ═══════════════════════════════════════════
+    //         EIP-7702 EXECUTOR TESTS
+    // ═══════════════════════════════════════════
+
+    function test_7702_executorBypassesSigs() public {
+        address exec = address(0xEEEE);
+        _delegateAndInitFull(2, 0, exec);
+        vm.deal(eoa, 1 ether);
+        address receiver = address(new Receiver());
+
+        vm.prank(exec);
+        Multisig(payable(eoa)).execute(receiver, 1 ether, "", "");
+        assertEq(receiver.balance, 1 ether);
+    }
+
+    function test_7702_executorBypassesDelay() public {
+        address exec = address(0xEEEE);
+        _delegateAndInitFull(2, 1 days, exec);
+        vm.deal(eoa, 1 ether);
+        address receiver = address(new Receiver());
+
+        vm.prank(exec);
+        Multisig(payable(eoa)).execute(receiver, 1 ether, "", "");
+        assertEq(receiver.balance, 1 ether);
+    }
+
+    function test_7702_executorCallWithData() public {
+        address exec = address(0xEEEE);
+        _delegateAndInitFull(2, 0, exec);
+
+        bytes memory data = abi.encodeCall(Multisig.setThreshold, (1));
+        vm.prank(exec);
+        Multisig(payable(eoa)).execute(eoa, 0, data, "");
+        assertEq(Multisig(payable(eoa)).threshold(), 1);
+    }
+
+    function test_7702_initWithDelayAndExecutor() public {
+        address exec = address(0xEEEE);
+        _delegateAndInitFull(2, 1 days, exec);
+
+        Multisig wallet = Multisig(payable(eoa));
+        assertEq(wallet.delay(), 1 days);
+        assertEq(wallet.executor(), exec);
+        assertEq(wallet.threshold(), 2);
+    }
+
+    // ═══════════════════════════════════════════
+    //      EIP-7702 EXECUTEQUEUED VIA EXECUTOR
+    // ═══════════════════════════════════════════
+
+    function test_7702_executorRelaysQueuedTx() public {
+        address exec = address(0xEEEE);
+        _delegateAndInitFull(2, 1 days, exec);
+        vm.deal(eoa, 1 ether);
+        address receiver = address(new Receiver());
+
+        Multisig wallet = Multisig(payable(eoa));
+        uint48 n = wallet.nonce();
+
+        // owners queue a tx
+        bytes memory sigs = _sign(eoa, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+        assertEq(receiver.balance, 0);
+
+        // executor relays the queued tx after delay
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(exec);
+        wallet.executeQueued(receiver, 1 ether, "", n);
+        assertEq(receiver.balance, 1 ether);
+    }
+
+    // ═══════════════════════════════════════════
+    //       EIP-7702 DELEGATECALL TESTS
+    // ═══════════════════════════════════════════
+
+    function test_7702_delegateCallViaExecute() public {
+        _delegateAndInit(2);
+        SetSlot7702 impl = new SetSlot7702();
+
+        bytes memory innerData = abi.encodeCall(SetSlot7702.setSlot, (42));
+        bytes memory data = abi.encodeCall(Multisig.delegateCall, (address(impl), innerData));
+        bytes memory sigs = _sign(eoa, eoa, 0, data, _pks2());
+
+        Multisig(payable(eoa)).execute(eoa, 0, data, sigs);
+        assertEq(uint256(vm.load(eoa, bytes32(0))), 42);
+    }
+
+    function test_7702_delegateCallRevertNotSelf() public {
+        _delegateAndInit(2);
+        vm.expectRevert(Multisig.Unauthorized.selector);
+        Multisig(payable(eoa)).delegateCall(address(0xBEEF), "");
+    }
+
+    function test_7702_delegateCallRevertInnerFails() public {
+        _delegateAndInit(2);
+        address rev = address(new Reverter7702());
+
+        bytes memory data = abi.encodeCall(Multisig.delegateCall, (rev, ""));
+        bytes memory sigs = _sign(eoa, eoa, 0, data, _pks2());
+
+        vm.expectRevert(bytes("nope"));
+        Multisig(payable(eoa)).execute(eoa, 0, data, sigs);
+    }
+
+    // ═══════════════════════════════════════════
+    //    EIP-7702 BATCH + DELEGATECALL TESTS
+    // ═══════════════════════════════════════════
+
+    function test_7702_batchWithDelegateCall() public {
+        _delegateAndInit(2);
+        SetSlot7702 impl = new SetSlot7702();
+        address newOwner = address(0xBEEF);
+
+        address[] memory targets = new address[](2);
+        uint256[] memory values = new uint256[](2);
+        bytes[] memory datas = new bytes[](2);
+
+        // first: addOwner via regular call
+        targets[0] = eoa;
+        datas[0] = abi.encodeCall(Multisig.addOwner, (newOwner));
+
+        // second: delegateCall
+        targets[1] = eoa;
+        datas[1] = abi.encodeCall(Multisig.delegateCall, (address(impl), abi.encodeCall(SetSlot7702.setSlot, (99))));
+
+        bytes memory batchData = abi.encodeCall(Multisig.batch, (targets, values, datas));
+        bytes memory sigs = _sign(eoa, eoa, 0, batchData, _pks2());
+
+        Multisig(payable(eoa)).execute(eoa, 0, batchData, sigs);
+
+        // delegateCall overwrote slot 0, but addOwner should have executed first
+        assertTrue(Multisig(payable(eoa)).isOwner(newOwner));
     }
 }

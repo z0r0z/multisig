@@ -6,6 +6,7 @@ contract Multisig {
     event AddedOwner(address indexed owner);
     event RemovedOwner(address indexed owner);
     event ChangedThreshold(uint256 threshold);
+    event ChangedExecutor(address indexed executor);
     event ExecutionSuccess(bytes32 indexed txHash, uint256 nonce);
     event Queued(bytes32 indexed txHash, uint256 nonce, uint256 eta);
 
@@ -14,9 +15,10 @@ contract Multisig {
     error InvalidConfig();
     error NotReady(uint256 eta);
 
-    uint64 public delay;
-    uint64 public nonce;
-    uint32 public threshold;
+    uint32 public delay;
+    uint48 public nonce;
+    uint16 public threshold;
+    address public executor;
     address immutable factory = msg.sender;
 
     address[] owners;
@@ -30,11 +32,12 @@ contract Multisig {
 
     constructor() payable {}
 
-    function init(address[] calldata _owners, uint64 _delay, uint256 _threshold) public payable {
+    function init(address[] calldata _owners, uint32 _delay, uint256 _threshold, address _executor) public payable {
         require(msg.sender == factory || msg.sender == address(this), Unauthorized());
         require(threshold == 0 && _threshold != 0 && _threshold <= _owners.length, InvalidConfig());
         if (_delay != 0) delay = _delay;
-        threshold = uint32(_threshold);
+        if (_executor != address(0)) executor = _executor;
+        threshold = uint16(_threshold);
         address prev;
         address owner;
         for (uint256 i; i != _owners.length; ++i) {
@@ -86,23 +89,25 @@ contract Multisig {
 
     function execute(address target, uint256 value, bytes calldata data, bytes calldata sigs) public payable {
         unchecked {
-            (uint64 _delay, uint64 _nonce, uint32 _threshold) = (delay, nonce++, threshold);
+            (uint32 _delay, uint48 _nonce, uint16 _threshold, address _executor) = (delay, nonce++, threshold, executor);
             bytes32 hash = _txHash(target, value, data, _nonce);
 
-            uint256 o;
-            address prev;
-            address signer;
-            require(_threshold != 0 && sigs.length == _threshold * 65, InvalidSig());
-            for (uint256 i; i != _threshold; ++i) {
-                o = i * 65;
-                signer = ecrecover(hash, uint8(sigs[o + 64]), bytes32(sigs[o:o + 32]), bytes32(sigs[o + 32:o + 64]));
-                require(signer != address(0) && isOwner[signer] && signer > prev, InvalidSig());
-                prev = signer;
+            if (msg.sender != _executor) {
+                uint256 o;
+                address prev;
+                address signer;
+                require(_threshold != 0 && sigs.length == _threshold * 65, InvalidSig());
+                for (uint256 i; i != _threshold; ++i) {
+                    o = i * 65;
+                    signer = ecrecover(hash, uint8(sigs[o + 64]), bytes32(sigs[o:o + 32]), bytes32(sigs[o + 32:o + 64]));
+                    require(signer != address(0) && isOwner[signer] && signer > prev, InvalidSig());
+                    prev = signer;
+                }
             }
 
-            if (_delay == 0) {
+            if (_delay == 0 || msg.sender == _executor) {
                 (bool ok, bytes memory ret) = target.call{value: value}(data);
-                if (!ok) assembly { revert(add(ret, 0x20), mload(ret)) }
+                if (!ok) assembly ("memory-safe") { revert(add(ret, 0x20), mload(ret)) }
                 emit ExecutionSuccess(hash, _nonce);
             } else {
                 uint256 eta = block.timestamp + _delay;
@@ -112,17 +117,17 @@ contract Multisig {
         }
     }
 
-    function executeQueued(address target, uint256 value, bytes calldata data, uint256 _nonce) public payable {
+    function executeQueued(address target, uint256 value, bytes calldata data, uint48 _nonce) public payable {
         bytes32 hash = _txHash(target, value, data, _nonce);
         uint256 eta = queued[hash];
         require(eta != 0 && block.timestamp >= eta, NotReady(eta));
         delete queued[hash];
         (bool ok, bytes memory ret) = target.call{value: value}(data);
-        if (!ok) assembly { revert(add(ret, 0x20), mload(ret)) }
+        if (!ok) assembly ("memory-safe") { revert(add(ret, 0x20), mload(ret)) }
         emit ExecutionSuccess(hash, _nonce);
     }
 
-    function _txHash(address target, uint256 value, bytes calldata data, uint256 _nonce)
+    function _txHash(address target, uint256 value, bytes calldata data, uint48 _nonce)
         internal
         view
         returns (bytes32)
@@ -133,7 +138,7 @@ contract Multisig {
                 DOMAIN_SEPARATOR(),
                 keccak256(
                     abi.encode(
-                        keccak256("Execute(address target,uint256 value,bytes data,uint64 nonce)"),
+                        keccak256("Execute(address target,uint256 value,bytes data,uint48 nonce)"),
                         target,
                         value,
                         keccak256(data),
@@ -142,6 +147,11 @@ contract Multisig {
                 )
             )
         );
+    }
+
+    function delegateCall(address target, bytes calldata data) public payable onlySelf {
+        (bool ok, bytes memory ret) = target.delegatecall(data);
+        if (!ok) assembly ("memory-safe") { revert(add(ret, 0x20), mload(ret)) }
     }
 
     function batch(address[] calldata targets, uint256[] calldata values, bytes[] calldata datas)
@@ -178,14 +188,17 @@ contract Multisig {
         emit RemovedOwner(_owner);
     }
 
-    function setDelay(uint64 _delay) public payable onlySelf {
-        delay = _delay;
-        emit ChangedDelay(_delay);
+    function setDelay(uint32 _delay) public payable onlySelf {
+        emit ChangedDelay(delay = _delay);
+    }
+
+    function setExecutor(address _executor) public payable onlySelf {
+        emit ChangedExecutor(executor = _executor);
     }
 
     function setThreshold(uint256 _threshold) public payable onlySelf {
         require(_threshold != 0 && _threshold <= owners.length, InvalidConfig());
-        threshold = uint32(_threshold);
+        threshold = uint16(_threshold);
         emit ChangedThreshold(_threshold);
     }
 
@@ -217,7 +230,7 @@ contract MultisigFactory {
     /// @dev Create deterministic multisig wallet with PUSH0 and CREATE2.
     /// Adapted from Solady (https://github.com/vectorized/solady/blob/main/src/utils/LibClone.sol).
     /// The salt must start with the zero address, or the caller, for front-running protection.
-    function create(address[] calldata _owners, uint64 _delay, uint256 _threshold, uint256 salt)
+    function create(address[] calldata _owners, uint32 _delay, uint256 _threshold, address _executor, uint256 salt)
         public
         payable
         returns (address wallet)
@@ -235,7 +248,7 @@ contract MultisigFactory {
             }
             mstore(0x24, 0)
         }
-        Multisig(payable(wallet)).init(_owners, _delay, _threshold);
+        Multisig(payable(wallet)).init(_owners, _delay, _threshold, _executor);
         emit Created(wallet);
     }
 }

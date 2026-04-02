@@ -1454,4 +1454,37 @@ contract MultisigTest is Test {
         vm.expectRevert(Multisig.InvalidSig.selector);
         wallet.isValidSignature(hash, sigs);
     }
+
+    // ───────── Storage Optimization Proof ─────────
+
+    function test_execute_singleSlotReadWrite() public {
+        wallet = _deployFunded(2, 1 ether);
+        address receiver = address(new Receiver());
+
+        uint256[] memory pks = new uint256[](2);
+        pks[0] = pk1;
+        pks[1] = pk2;
+        if (vm.addr(pk1) > vm.addr(pk2)) (pks[0], pks[1]) = (pks[1], pks[0]);
+
+        bytes memory sigs = _sign(wallet, receiver, 0.1 ether, "", pks);
+
+        vm.record();
+        wallet.execute(receiver, 0.1 ether, "", sigs);
+        (bytes32[] memory reads, bytes32[] memory writes) = vm.accesses(address(wallet));
+
+        // Slot 0 holds delay|nonce|threshold|executor — packed into a single 32-byte slot.
+        // Expect 1 SSTORE (nonce++). vm.accesses counts 2 reads because SSTORE implicitly
+        // reads the current value for EIP-2200 gas calculation, so 1 SLOAD + 1 SSTORE = 2 reads + 1 write.
+        uint256 slot0Reads;
+        uint256 slot0Writes;
+        for (uint256 i; i < reads.length; i++) {
+            if (reads[i] == bytes32(0)) slot0Reads++;
+        }
+        for (uint256 i; i < writes.length; i++) {
+            if (writes[i] == bytes32(0)) slot0Writes++;
+        }
+
+        assertEq(slot0Writes, 1, "slot 0: exactly 1 SSTORE (nonce++)");
+        assertEq(slot0Reads, 2, "slot 0: 1 explicit SLOAD + 1 implicit from SSTORE");
+    }
 }

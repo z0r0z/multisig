@@ -313,19 +313,19 @@ contract MultisigTest is Test {
     function test_init_revertDoubleInit() public {
         wallet = _deploy(2);
         address[] memory sorted = _sortedOwners();
-        vm.expectRevert(Multisig.InvalidInit.selector);
+        vm.expectRevert(Multisig.InvalidConfig.selector);
         wallet.init(sorted, 2);
     }
 
     function test_init_revertThresholdZero() public {
         address[] memory sorted = _sortedOwners();
-        vm.expectRevert(Multisig.InvalidInit.selector);
+        vm.expectRevert(Multisig.InvalidConfig.selector);
         factory.create(sorted, 0, nextSalt++);
     }
 
     function test_init_revertThresholdTooHigh() public {
         address[] memory sorted = _sortedOwners();
-        vm.expectRevert(Multisig.InvalidInit.selector);
+        vm.expectRevert(Multisig.InvalidConfig.selector);
         factory.create(sorted, 4, nextSalt++);
     }
 
@@ -333,7 +333,7 @@ contract MultisigTest is Test {
         address[] memory sorted = _sortedOwners();
         // swap first two to break sort
         (sorted[0], sorted[1]) = (sorted[1], sorted[0]);
-        vm.expectRevert(Multisig.InvalidInit.selector);
+        vm.expectRevert(Multisig.InvalidConfig.selector);
         factory.create(sorted, 2, nextSalt++);
     }
 
@@ -341,14 +341,14 @@ contract MultisigTest is Test {
         address[] memory dup = new address[](2);
         dup[0] = owner1;
         dup[1] = owner1;
-        vm.expectRevert(Multisig.InvalidInit.selector);
+        vm.expectRevert(Multisig.InvalidConfig.selector);
         factory.create(dup, 1, nextSalt++);
     }
 
     function test_init_revertAddressZeroOwner() public {
         address[] memory arr = new address[](1);
         arr[0] = address(0);
-        vm.expectRevert(Multisig.InvalidInit.selector);
+        vm.expectRevert(Multisig.InvalidConfig.selector);
         factory.create(arr, 1, nextSalt++);
     }
 
@@ -795,6 +795,42 @@ contract MultisigTest is Test {
         assertEq(wallet.DOMAIN_SEPARATOR(), _domainSeparator(address(wallet)));
     }
 
+    function test_eip712DomainTypeHash() public pure {
+        assertEq(
+            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+            0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f
+        );
+    }
+
+    function test_nameHash() public pure {
+        assertEq(keccak256("Multisig"), 0xcd4046335c6490bc800b62dfe4e32b5bbe64545e84e866aba69afbf5ce39f2df);
+    }
+
+    function test_versionHash() public pure {
+        assertEq(keccak256("1"), 0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6);
+    }
+
+    function test_executeTypeHash() public pure {
+        assertEq(keccak256("Execute(address to,uint256 value,bytes data,uint128 nonce)"), EXECUTE_TYPEHASH);
+    }
+
+    function test_safeMessageTypeHash() public pure {
+        assertEq(keccak256("SafeMessage(bytes32 hash)"), SAFE_MSG_TYPEHASH);
+    }
+
+    function test_errorSelectors() public pure {
+        assertEq(MultisigFactory.SaltDoesNotStartWith.selector, bytes4(0x0c4549ef));
+        assertEq(MultisigFactory.DeploymentFailed.selector, bytes4(0x30116425));
+    }
+
+    function test_fallbackSelectors() public pure {
+        assertEq(bytes4(keccak256("onERC721Received(address,address,uint256,bytes)")), bytes4(0x150b7a02));
+        assertEq(bytes4(keccak256("onERC1155Received(address,address,uint256,uint256,bytes)")), bytes4(0xf23a6e61));
+        assertEq(
+            bytes4(keccak256("onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)")), bytes4(0xbc197c81)
+        );
+    }
+
     // ═══════════════════════════════════════════
     //           COMBINED FLOW TESTS
     // ═══════════════════════════════════════════
@@ -836,5 +872,23 @@ contract MultisigTest is Test {
         sigs = _sign(wallet, receiver, 1 ether, "", _pksSingle(pk));
         wallet.execute(receiver, 1 ether, "", sigs);
         assertEq(receiver.balance, 1 ether);
+    }
+
+    function test_execute_revertZeroRecovery() public {
+        wallet = _deployFunded(1, 1 ether);
+        address receiver = address(new Receiver());
+        // 65 zero bytes → ecrecover returns address(0)
+        bytes memory sigs = new bytes(65);
+        vm.expectRevert(Multisig.InvalidSig.selector);
+        wallet.execute(receiver, 1 ether, "", sigs);
+    }
+
+    function test_isValidSignature_revertZeroRecovery() public {
+        wallet = _deploy(1);
+        bytes32 hash = keccak256("test message");
+        // 65 zero bytes → ecrecover returns address(0)
+        bytes memory sigs = new bytes(65);
+        vm.expectRevert(Multisig.InvalidSig.selector);
+        wallet.isValidSignature(hash, sigs);
     }
 }

@@ -12,8 +12,8 @@
 
 | Contract | Lines | Description |
 |---|---|---|
-| `Multisig` | 1–240 | Threshold multisig with optional timelock, executor role, and pre/post guardian hooks |
-| `MultisigFactory` | 242–277 | Minimal proxy (PUSH0 clone) factory with CREATE2 |
+| `Multisig` | 4–245 | Threshold multisig with optional timelock, executor role, and pre/post guardian hooks |
+| `MultisigFactory` | 247–281 | Minimal proxy (PUSH0 clone) factory with CREATE2 |
 
 ---
 
@@ -33,11 +33,15 @@
 | L4 | Lead | Signature malleability (no low-s check in ecrecover) | — | 2 | Mitigated by sorted-signer ordering |
 | L5 | Lead | uint32 nonce overflow in unchecked block | — | 2 | Impractical (~4B txs required) |
 | L6 | Lead | Stale executor reference in post-hook | — | 1 | Accepted — atomic tx semantics limit impact |
-| L7 | Lead | No reentrancy guard on execute (hook interaction) | — | 1 | Accepted — executor is trusted |
-| L8 | Lead | Uninitialized implementation contract | — | 2 | Low risk |
+| L7 | Lead | No reentrancy guard on execute (hook interaction) | — | 1 | Accepted — nonce-per-call is the reentrancy defense |
+| L8 | Lead | Uninitialized implementation contract | — | 2 | Unreachable — impossible to initialize (see L8 details) |
 | L9 | Lead | `batch()` missing array length validation | — | 2 | Solidity ABI decoder catches |
 | L10 | Lead | `addOwner` breaks sorted-order invariant | — | 4 | Cosmetic — off-chain tooling only |
 | L11 | Lead | `msg.value` not earmarked when transaction is queued | — | 1 | Design tradeoff |
+| L12 | Lead | EIP-7702 EOA key remains a superuser | — | 1 | Inherent 7702 property, not a contract bug |
+| L13 | Lead | Fallback silently succeeds for unknown selectors | — | 1 | Not exploitable — requires threshold sigs |
+| L14 | Lead | `isValidSignature` type hash differs from Safe | — | 1 | Intentional — own signing domain |
+| L15 | Lead | Contract owners can be added but can't sign | — | 1 | Intentional — same as Safe v1.0–1.3 |
 
 ---
 
@@ -53,7 +57,7 @@
 
 **Proof:**
 ```solidity
-// Line 261: zero-prefix salt allows anyone to use it
+// Line 266: zero-prefix salt allows anyone to use it
 require(salt >> 96 == 0 || salt >> 96 == uint160(msg.sender), SaltDoesNotStartWith());
 // salt >> 96 == 0 → no sender binding → any caller can deploy with this salt
 ```
@@ -73,10 +77,10 @@ require(salt >> 96 == 0 || salt >> 96 == uint160(msg.sender), SaltDoesNotStartWi
 ### [F-2] MEDIUM — Pre-execution hook fires before signature validation [agents: 7]
 
 **Contract:** Multisig
-**Function:** `execute()` (lines 111–115)
+**Function:** `execute()` (lines 111–113)
 **Bug class:** pre-validation-external-call
 
-**Description:** When the executor address has its top 2 bytes matching `0x1111` (line 113: `uint160(_executor) >> 144 == 0x1111`), an external call `Multisig(payable(_executor)).execute(target, value, data, sigs)` fires at line 114 BEFORE signature verification at lines 118–126. Any caller can forward arbitrary unvalidated parameters to the executor contract. If the executor is a Multisig where the calling contract is set as its executor, the forwarded call executes without signature validation on either side. EVM atomicity means the entire transaction reverts if the subsequent sig check fails, so state changes don't persist for unauthorized callers — but when `msg.sender == executor`, the sig check is skipped entirely and both the pre-hook call and local execution proceed.
+**Description:** When the executor address has its top 2 bytes matching `0x1111` (line 111: `uint160(_executor) >> 144 == 0x1111`), an external call `Multisig(payable(_executor)).execute(target, value, data, sigs)` fires at line 112 BEFORE signature verification at lines 119–125. Any caller can forward arbitrary unvalidated parameters to the executor contract. If the executor is a Multisig where the calling contract is set as its executor, the forwarded call executes without signature validation on either side. EVM atomicity means the entire transaction reverts if the subsequent sig check fails, so state changes don't persist for unauthorized callers — but when `msg.sender == executor`, the sig check is skipped entirely and both the pre-hook call and local execution proceed.
 
 **Confidence:** 90
 
@@ -87,7 +91,7 @@ require(salt >> 96 == 0 || salt >> 96 == uint160(msg.sender), SaltDoesNotStartWi
 ### [F-3] MEDIUM — Queued transactions had no cancellation mechanism [agents: 7] — RESOLVED
 
 **Contract:** Multisig
-**Function:** `executeQueued()` (line 148)
+**Function:** `executeQueued()` (line 149)
 **Bug class:** missing-safety-mechanism
 
 **Description:** `executeQueued` has no access control — any address can execute a queued transaction once `block.timestamp >= eta`. There was no `cancelQueued` function. Once queued, a malicious transaction (from compromised-then-rotated signers) would execute irrevocably after the delay period. A cancel via `onlySelf` would itself be timelocked, making it useless — the malicious tx would execute before the cancel clears its own delay.
@@ -110,7 +114,7 @@ function cancelQueued(bytes32 hash) public payable {
 ### [F-4] LOW — `executeQueued` callable by anyone [agents: 7]
 
 **Contract:** Multisig
-**Function:** `executeQueued()` (line 148)
+**Function:** `executeQueued()` (line 149)
 **Bug class:** missing-access-control
 
 **Description:** `executeQueued` has no access control. Once a transaction's ETA has passed, any address can trigger execution. This enables MEV extraction on the execution and removes owners' ability to choose execution timing.
@@ -126,10 +130,10 @@ function cancelQueued(bytes32 hash) public payable {
 ### [F-5] LOW — Post-execution hook fires even when transaction is only queued [agents: 2]
 
 **Contract:** Multisig
-**Function:** `execute()` (lines 138–141)
+**Function:** `execute()` (lines 138–140)
 **Bug class:** logic-error
 
-**Description:** The post-hook at lines 138–141 fires unconditionally after the execute/queue branching logic. When `delay > 0` and the transaction is only queued (not executed), the post-hook still calls `executor.execute(target, value, data, sigs)`, forwarding the queued transaction's parameters to the executor contract.
+**Description:** The post-hook at lines 138–140 fires unconditionally after the execute/queue branching logic. When `delay > 0` and the transaction is only queued (not executed), the post-hook still calls `executor.execute(target, value, data, sigs)`, forwarding the queued transaction's parameters to the executor contract.
 
 **Confidence:** 75
 
@@ -140,10 +144,10 @@ function cancelQueued(bytes32 hash) public payable {
 ### [F-6] LOW — Both pre-hook and post-hook fire for crafted executor address [agents: 5]
 
 **Contract:** Multisig
-**Function:** `execute()` (lines 111–115, 138–141)
+**Function:** `execute()` (lines 111–113, 138–140)
 **Bug class:** double-invocation
 
-**Description:** The pre-hook (line 113: `uint160(_executor) >> 144 == 0x1111`) and post-hook (line 140: `uint160(_executor) & 0xFFFF == 0x1111`) check non-overlapping bits and are not mutually exclusive. An executor address satisfying both (e.g., `0x1111...1111`) triggers `executor.execute()` twice per transaction.
+**Description:** The pre-hook (line 111: `uint160(_executor) >> 144 == 0x1111`) and post-hook (line 138: `uint160(_executor) & 0xFFFF == 0x1111`) check non-overlapping bits and are not mutually exclusive. An executor address satisfying both (e.g., `0x1111...1111`) triggers `executor.execute()` twice per transaction.
 
 **Confidence:** 75
 
@@ -155,7 +159,7 @@ function cancelQueued(bytes32 hash) public payable {
 
 _High-signal trails for manual review. Not scored._
 
-- **[L1] Executor bypasses both signatures and timelock** — `Multisig.execute` — The executor skips signature verification (line 117) AND the timelock delay (line 130). A compromised executor key has unilateral, immediate control. **Assessment:** By design. The executor is an intentionally trusted module (Safe-like pattern). Users who set an executor accept this trust assumption. Consistent with the guardian architecture where the executor is a privileged emergency key.
+- **[L1] Executor bypasses both signatures and timelock** — `Multisig.execute` — The executor skips signature verification (line 115) AND the timelock delay (line 128). A compromised executor key has unilateral, immediate control. **Assessment:** By design. The executor is an intentionally trusted module (Safe-like pattern). Users who set an executor accept this trust assumption. Consistent with the guardian architecture where the executor is a privileged emergency key.
 
 - **[L2] Executor can burn nonces to invalidate owner signatures** — `Multisig.execute` — The executor can call `execute()` with dummy parameters to increment nonces, invalidating pre-signed owner transactions. **Assessment:** Subset of executor trust. If the executor is compromised, nonce griefing is the least concern — they can drain the wallet directly.
 
@@ -165,11 +169,11 @@ _High-signal trails for manual review. Not scored._
 
 - **[L5] uint32 nonce overflow** — `Multisig.execute` — `nonce` is `uint32` incremented in `unchecked`, wrapping after ~4 billion executions. **Assessment:** Impractical on L1. On L2 with a compromised executor burning nonces, still requires billions of transactions at gas cost exceeding any economic incentive.
 
-- **[L6] Stale executor reference in post-hook** — `Multisig.execute` — Executor is cached at function entry (line 110). If the executed transaction changes the executor via `setExecutor`, the post-hook uses the stale (old) address. **Assessment:** Accepted. The post-hook firing on the old executor during a single atomic tx that changes the executor is a known edge case with limited impact.
+- **[L6] Stale executor reference in post-hook** — `Multisig.execute` — Executor is cached at function entry (line 108). If the executed transaction changes the executor via `setExecutor`, the post-hook uses the stale (old) address. **Assessment:** Accepted. The post-hook firing on the old executor during a single atomic tx that changes the executor is a known edge case with limited impact.
 
 - **[L7] No reentrancy guard on execute** — `Multisig.execute` — Pre/post hooks and `target.call` enable reentrant `execute()` calls, each consuming a fresh nonce. **Assessment:** Accepted. The executor is trusted, and non-executor reentrant calls still require valid signatures for each new nonce.
 
-- **[L8] Uninitialized implementation contract** — `MultisigFactory` — The implementation deployed by the factory constructor is never initialized. `init()` requires `msg.sender == factory`, preventing third-party initialization. Holds no funds by design.
+- **[L8] Uninitialized implementation contract** — `MultisigFactory` — The implementation deployed by the factory constructor is never initialized. Initialization is provably impossible: (1) `init()` requires `msg.sender == factory || msg.sender == address(this)` (line 38); (2) the factory only calls `init` on clones (line 278), never on the implementation; (3) the implementation cannot call itself because `execute()` reverts when `threshold == 0` (line 119) — circular dependency. Holds no funds by design.
 
 - **[L9] `batch()` missing array length validation** — `Multisig.batch` — No check that `targets`, `values`, and `datas` arrays have equal lengths. Solidity's ABI decoder reverts on out-of-bounds access. UX issue only.
 
@@ -177,13 +181,21 @@ _High-signal trails for manual review. Not scored._
 
 - **[L11] `msg.value` not earmarked when transaction is queued** — `Multisig.execute` — ETH sent with a queued `execute()` call is absorbed into the contract's general balance. The queued transaction uses whatever balance exists at execution time. Design tradeoff — the multisig is expected to hold ETH.
 
+- **[L12] EIP-7702 EOA key remains a superuser** — `Multisig.init` / `Multisig.execute` — In an EIP-7702 deployment, the delegating EOA's private key retains full authority: it can send regular transactions bypassing the multisig, satisfy `msg.sender == address(this)` for `onlySelf` functions, and revoke the delegation at any time. This means the k-of-n threshold is not a hard security boundary — the EOA key is an implicit (k=1) override. **Assessment:** Inherent property of EIP-7702, not a contract bug. The README documents this: "The EOA private key remains a superuser." Suited for personal wallets (co-signing), not shared custody. Deployment-model caveat, not an unprivileged attack path against clone-based wallets.
+
+- **[L13] Fallback silently succeeds for unknown selectors** — `Multisig.fallback` (lines 236–244) — The fallback only handles three token-callback selectors (`onERC721Received`, `onERC1155Received`, `onERC1155BatchReceived`). For any other selector, execution falls through the `if` block with no `revert`, returning success with empty returndata. A threshold-signed `execute(address(this), 0, abi.encodeWithSelector(0xdeadbeef), sigs)` succeeds silently as a no-op. In `batch`, a mistyped self-call selector succeeds without reverting, potentially masking operator mistakes in multi-step governance transactions. **Assessment:** Not exploitable — requires threshold signatures or executor. Informational ergonomics risk. The Solady `Receiver.sol` pattern this is adapted from behaves identically. Minimal fix: add a default `revert` after the token-callback `if` block, or document the behavior and rely on off-chain tooling to catch selector typos.
+
+- **[L14] `isValidSignature` uses `SafeMessage(bytes32 hash)`, not Safe's `SafeMessage(bytes message)`** — `Multisig.isValidSignature` (lines 84–103) — The function wraps the supplied hash in an EIP-712 `SafeMessage(bytes32 hash)` typed-data digest. Safe's `CompatibilityFallbackHandler` uses `SafeMessage(bytes message)` with dynamic `bytes` encoding. Same pattern, different type hash — signatures produced by the Safe UI/SDK will not validate here. **Assessment:** Intentional. This wallet has its own signing domain. Integrators must use the correct type hash. Not a vulnerability.
+
+- **[L15] Contract addresses can be owners but cannot sign** — `Multisig.init` / `Multisig.addOwner` — Any nonzero address above the sentinel can be added as an owner, including contracts. Signature verification uses `ecrecover` only — no ERC-1271 owner support. A contract owner counts toward `ownerCount` and `threshold` math but can never produce a valid signature. **Assessment:** Intentional scope decision. ERC-1271 owner support is omitted for simplicity and gas efficiency. Adding a contract as an owner is user misconfiguration. Same design as Safe v1.0–1.3.
+
 ---
 
 ## Changes Made
 
 | Change | Commit | Description |
 |--------|--------|-------------|
-| `cancelQueued(bytes32)` | pending | Executor-only emergency cancellation for queued transactions. Resolves F-3. |
+| `cancelQueued(bytes32)` | `5c2991a` | Executor-only emergency cancellation for queued transactions. Resolves F-3. |
 
 ---
 
@@ -203,6 +215,8 @@ This audit was performed using the [Pashov Skills](https://github.com/pashov/ski
 Results were deduplicated by `group_key`, gate-evaluated per the Pashov judging framework (4 sequential gates: refutation, reachability, trigger, impact), and reviewed with the developer to assess design intent vs. vulnerability.
 
 **Second pass (2026-04-03):** Re-ran the full 8-agent audit after the initial report. New findings related to the guardian hook mechanism (F-2, F-5, F-6) were identified and discussed with the developer. The missing cancellation mechanism (F-3) was resolved by adding `cancelQueued()`.
+
+**Third-party review (2026-04-03):** Two-pass independent GPT-4.5 review following the SECURITY.md methodology. First pass: structural compliance but lacked line-level citations; confirmed 0 new scoreable findings and surfaced L12 (EIP-7702 EOA key superuser). Second pass: full function-by-function walkthrough with line citations and cross-function attack analysis; confirmed all invariants, surfaced L13 (fallback silent success for unknown selectors). Both passes reached correct conclusions; the second pass met the methodology's depth requirements.
 
 ---
 

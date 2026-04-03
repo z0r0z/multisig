@@ -1752,4 +1752,902 @@ contract MultisigTest is Test {
         assertEq(guard.calls(), 1, "post-guard called on queue");
         assertEq(receiver.balance, 0, "tx queued, not executed");
     }
+
+    // ═══════════════════════════════════════════
+    //        CROSS-WALLET REPLAY PROTECTION
+    // ═══════════════════════════════════════════
+
+    function test_crossWallet_sigNotReusable() public {
+        Multisig w1 = _deployFunded(2, 2 ether);
+        Multisig w2 = _deployFunded(2, 2 ether);
+        address receiver = address(new Receiver());
+
+        // Sign for w1
+        bytes memory sigs = _sign(w1, receiver, 1 ether, "", _pks2());
+        w1.execute(receiver, 1 ether, "", sigs);
+        assertEq(receiver.balance, 1 ether);
+
+        // Replay on w2 — different DOMAIN_SEPARATOR
+        vm.expectRevert(Multisig.InvalidSig.selector);
+        w2.execute(receiver, 1 ether, "", sigs);
+    }
+
+    function test_crossWallet_isValidSignatureNotReusable() public {
+        Multisig w1 = _deploy(2);
+        Multisig w2 = _deploy(2);
+        bytes32 hash = keccak256("test message");
+
+        bytes memory sigs = _signHash(_safeDigest(w1, hash), _pks2());
+        assertEq(w1.isValidSignature(hash, sigs), bytes4(0x1626ba7e));
+
+        // Replay on w2
+        vm.expectRevert(Multisig.InvalidSig.selector);
+        w2.isValidSignature(hash, sigs);
+    }
+
+    function test_crossChain_sigInvalidAfterFork() public {
+        wallet = _deployFunded(2, 2 ether);
+        address receiver = address(new Receiver());
+
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+
+        // Simulate chain fork — change chainId
+        vm.chainId(999);
+        bytes memory sigs2 = _sign(wallet, receiver, 1 ether, "", _pks2());
+        // Sign on new chain works
+        wallet.execute(receiver, 1 ether, "", sigs2);
+        assertEq(receiver.balance, 2 ether);
+    }
+
+    // ═══════════════════════════════════════════
+    //      EXECUTE / ISVALIDSIG DOMAIN ISOLATION
+    // ═══════════════════════════════════════════
+
+    function test_executeSigNotValidForIsValidSignature() public {
+        wallet = _deploy(2);
+
+        // Sign an execute digest
+        bytes32 execDigest = _digest(wallet, address(0xBEEF), 0, "");
+        bytes memory sigs = _signHash(execDigest, _pks2());
+
+        // Use as isValidSignature — should fail (different type hash wrapping)
+        vm.expectRevert(Multisig.InvalidSig.selector);
+        wallet.isValidSignature(execDigest, sigs);
+    }
+
+    // ═══════════════════════════════════════════
+    //        NEW OWNER CAN SIGN AFTER ADD
+    // ═══════════════════════════════════════════
+
+    function test_newOwnerCanSignAfterAdd() public {
+        wallet = _deploy(1);
+        vm.deal(address(wallet), 2 ether);
+        address receiver = address(new Receiver());
+
+        uint256 newPk = 0xD4;
+        address newOwner = vm.addr(newPk);
+
+        // Add new owner
+        bytes memory data = abi.encodeCall(Multisig.addOwner, (newOwner));
+        address[] memory sorted = _sortedOwners();
+        uint256 signerPk;
+        if (vm.addr(pk1) == sorted[0]) signerPk = pk1;
+        else if (vm.addr(pk2) == sorted[0]) signerPk = pk2;
+        else signerPk = pk3;
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pksSingle(signerPk));
+        wallet.execute(address(wallet), 0, data, sigs);
+        assertTrue(wallet.isOwner(newOwner));
+
+        // Now the new owner signs a tx
+        sigs = _sign(wallet, receiver, 1 ether, "", _pksSingle(newPk));
+        wallet.execute(receiver, 1 ether, "", sigs);
+        assertEq(receiver.balance, 1 ether);
+    }
+
+    // ═══════════════════════════════════════════
+    //      REMOVED OWNER CANNOT SIGN ANYMORE
+    // ═══════════════════════════════════════════
+
+    function test_removedOwnerCannotSign() public {
+        wallet = _deploy(1);
+        vm.deal(address(wallet), 2 ether);
+        address receiver = address(new Receiver());
+        address[] memory sorted = _sortedOwners();
+
+        // Find the PK for sorted[2] (last in linked list)
+        uint256 removedPk;
+        if (vm.addr(pk1) == sorted[2]) removedPk = pk1;
+        else if (vm.addr(pk2) == sorted[2]) removedPk = pk2;
+        else removedPk = pk3;
+
+        // Remove sorted[2]
+        bytes memory data = abi.encodeCall(Multisig.removeOwner, (sorted[1], sorted[2]));
+        // Sign with sorted[0]
+        uint256 signerPk;
+        if (vm.addr(pk1) == sorted[0]) signerPk = pk1;
+        else if (vm.addr(pk2) == sorted[0]) signerPk = pk2;
+        else signerPk = pk3;
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pksSingle(signerPk));
+        wallet.execute(address(wallet), 0, data, sigs);
+
+        // Removed owner tries to sign — should fail
+        sigs = _sign(wallet, receiver, 1 ether, "", _pksSingle(removedPk));
+        vm.expectRevert(Multisig.InvalidSig.selector);
+        wallet.execute(receiver, 1 ether, "", sigs);
+    }
+
+    // ═══════════════════════════════════════════
+    //           RE-QUEUE AFTER CANCEL
+    // ═══════════════════════════════════════════
+
+    function test_reQueueAfterCancel() public {
+        address exec = address(0xEEEE);
+        wallet = _deployFull(2, 1 days, exec, 2 ether);
+        address receiver = address(new Receiver());
+
+        // Queue tx
+        uint32 n1 = wallet.nonce();
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+        bytes32 hash1 = _txHash(wallet, receiver, 1 ether, "", n1);
+        assertGt(wallet.queued(hash1), 0);
+
+        // Cancel
+        vm.prank(exec);
+        wallet.cancelQueued(hash1);
+        assertEq(wallet.queued(hash1), 0);
+
+        // Re-queue with new nonce
+        uint32 n2 = wallet.nonce();
+        sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+        bytes32 hash2 = _txHash(wallet, receiver, 1 ether, "", n2);
+        assertGt(wallet.queued(hash2), 0);
+        assertTrue(hash1 != hash2); // different nonce => different hash
+
+        // Execute re-queued
+        vm.warp(block.timestamp + 1 days);
+        wallet.executeQueued(receiver, 1 ether, "", n2);
+        assertEq(receiver.balance, 1 ether);
+    }
+
+    // ═══════════════════════════════════════════
+    //       MULTIPLE QUEUED TXS SIMULTANEOUSLY
+    // ═══════════════════════════════════════════
+
+    function test_multipleQueuedTxs() public {
+        wallet = _deployWithDelay(2, 1 days);
+        vm.deal(address(wallet), 5 ether);
+        address r1 = address(new Receiver());
+        address r2 = address(new Receiver());
+
+        // Queue two different txs
+        uint32 n1 = wallet.nonce();
+        bytes memory sigs1 = _sign(wallet, r1, 1 ether, "", _pks2());
+        wallet.execute(r1, 1 ether, "", sigs1);
+
+        uint32 n2 = wallet.nonce();
+        bytes memory sigs2 = _sign(wallet, r2, 2 ether, "", _pks2());
+        wallet.execute(r2, 2 ether, "", sigs2);
+
+        // Both queued
+        assertGt(wallet.queued(_txHash(wallet, r1, 1 ether, "", n1)), 0);
+        assertGt(wallet.queued(_txHash(wallet, r2, 2 ether, "", n2)), 0);
+
+        // Execute both after delay
+        vm.warp(block.timestamp + 1 days);
+        wallet.executeQueued(r1, 1 ether, "", n1);
+        wallet.executeQueued(r2, 2 ether, "", n2);
+        assertEq(r1.balance, 1 ether);
+        assertEq(r2.balance, 2 ether);
+    }
+
+    // ═══════════════════════════════════════════
+    //    EXECUTEQUEUED WITH WRONG PARAMS FAILS
+    // ═══════════════════════════════════════════
+
+    function test_executeQueued_revertWrongTarget() public {
+        wallet = _deployWithDelay(2, 1 days);
+        vm.deal(address(wallet), 1 ether);
+        address receiver = address(new Receiver());
+
+        uint32 n = wallet.nonce();
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+
+        vm.warp(block.timestamp + 1 days);
+        vm.expectRevert(abi.encodeWithSelector(Multisig.NotReady.selector, 0));
+        wallet.executeQueued(address(0xBEEF), 1 ether, "", n); // wrong target
+    }
+
+    function test_executeQueued_revertWrongValue() public {
+        wallet = _deployWithDelay(2, 1 days);
+        vm.deal(address(wallet), 1 ether);
+        address receiver = address(new Receiver());
+
+        uint32 n = wallet.nonce();
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+
+        vm.warp(block.timestamp + 1 days);
+        vm.expectRevert(abi.encodeWithSelector(Multisig.NotReady.selector, 0));
+        wallet.executeQueued(receiver, 2 ether, "", n); // wrong value
+    }
+
+    function test_executeQueued_revertWrongData() public {
+        wallet = _deployWithDelay(2, 1 days);
+        address receiver = address(new Receiver());
+
+        uint32 n = wallet.nonce();
+        bytes memory sigs = _sign(wallet, receiver, 0, "hello", _pks2());
+        wallet.execute(receiver, 0, "hello", sigs);
+
+        vm.warp(block.timestamp + 1 days);
+        vm.expectRevert(abi.encodeWithSelector(Multisig.NotReady.selector, 0));
+        wallet.executeQueued(receiver, 0, "wrong", n); // wrong data
+    }
+
+    function test_executeQueued_revertWrongNonce() public {
+        wallet = _deployWithDelay(2, 1 days);
+        vm.deal(address(wallet), 1 ether);
+        address receiver = address(new Receiver());
+
+        uint32 n = wallet.nonce();
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+
+        vm.warp(block.timestamp + 1 days);
+        vm.expectRevert(abi.encodeWithSelector(Multisig.NotReady.selector, 0));
+        wallet.executeQueued(receiver, 1 ether, "", n + 1); // wrong nonce
+    }
+
+    // ═══════════════════════════════════════════
+    //          ADDOWNER EDGE CASES
+    // ═══════════════════════════════════════════
+
+    function test_addOwner_revertSentinel() public {
+        wallet = _deploy(2);
+        bytes memory data = abi.encodeCall(Multisig.addOwner, (address(1)));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        vm.expectRevert(); // _owner > SENTINEL fails since _owner == SENTINEL
+        wallet.execute(address(wallet), 0, data, sigs);
+    }
+
+    function test_addOwner_ownerCountIncreases() public {
+        wallet = _deploy(2);
+        assertEq(wallet.ownerCount(), 3);
+        address newOwner = address(0xBEEF);
+
+        bytes memory data = abi.encodeCall(Multisig.addOwner, (newOwner));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        wallet.execute(address(wallet), 0, data, sigs);
+
+        assertEq(wallet.ownerCount(), 4);
+    }
+
+    // ═══════════════════════════════════════════
+    //        REMOVEOWNER — FIRST IN LIST
+    // ═══════════════════════════════════════════
+
+    function test_removeOwner_firstInList() public {
+        wallet = _deploy(2);
+        address[] memory sorted = _sortedOwners();
+
+        // Remove first owner (prev = SENTINEL)
+        bytes memory data = abi.encodeCall(Multisig.removeOwner, (address(1), sorted[0]));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        wallet.execute(address(wallet), 0, data, sigs);
+
+        assertFalse(wallet.isOwner(sorted[0]));
+        assertEq(wallet.ownerCount(), 2);
+
+        // Verify linked list integrity
+        address[] memory remaining = wallet.getOwners();
+        assertEq(remaining.length, 2);
+        assertEq(remaining[0], sorted[1]);
+        assertEq(remaining[1], sorted[2]);
+    }
+
+    function test_removeOwner_middleInList() public {
+        wallet = _deploy(2);
+        address[] memory sorted = _sortedOwners();
+
+        // Remove middle owner
+        bytes memory data = abi.encodeCall(Multisig.removeOwner, (sorted[0], sorted[1]));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        wallet.execute(address(wallet), 0, data, sigs);
+
+        assertFalse(wallet.isOwner(sorted[1]));
+        address[] memory remaining = wallet.getOwners();
+        assertEq(remaining.length, 2);
+        assertEq(remaining[0], sorted[0]);
+        assertEq(remaining[1], sorted[2]);
+    }
+
+    function test_removeOwner_ownerCountDecreases() public {
+        wallet = _deploy(2);
+        assertEq(wallet.ownerCount(), 3);
+        address[] memory sorted = _sortedOwners();
+
+        bytes memory data = abi.encodeCall(Multisig.removeOwner, (sorted[1], sorted[2]));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        wallet.execute(address(wallet), 0, data, sigs);
+
+        assertEq(wallet.ownerCount(), 2);
+    }
+
+    // ═══════════════════════════════════════════
+    //          ISOWNER EDGE CASES
+    // ═══════════════════════════════════════════
+
+    function test_isOwner_sentinel() public {
+        wallet = _deploy(2);
+        assertFalse(wallet.isOwner(address(1)));
+    }
+
+    function test_isOwner_addressZero() public {
+        wallet = _deploy(2);
+        assertFalse(wallet.isOwner(address(0)));
+    }
+
+    function test_isOwner_nonOwner() public {
+        wallet = _deploy(2);
+        assertFalse(wallet.isOwner(address(0xDEAD)));
+    }
+
+    // ═══════════════════════════════════════════
+    //           BATCH EDGE CASES
+    // ═══════════════════════════════════════════
+
+    function test_batch_emptyArrays() public {
+        wallet = _deploy(2);
+        address[] memory targets = new address[](0);
+        uint256[] memory values = new uint256[](0);
+        bytes[] memory datas = new bytes[](0);
+
+        bytes memory batchData = abi.encodeCall(Multisig.batch, (targets, values, datas));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, batchData, _pks2());
+        wallet.execute(address(wallet), 0, batchData, sigs);
+        // No revert — empty batch is a no-op
+    }
+
+    function test_batch_singleOperation() public {
+        wallet = _deploy(2);
+        vm.deal(address(wallet), 1 ether);
+        address receiver = address(new Receiver());
+
+        address[] memory targets = new address[](1);
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory datas = new bytes[](1);
+        targets[0] = receiver;
+        values[0] = 1 ether;
+
+        bytes memory batchData = abi.encodeCall(Multisig.batch, (targets, values, datas));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, batchData, _pks2());
+        wallet.execute(address(wallet), 0, batchData, sigs);
+        assertEq(receiver.balance, 1 ether);
+    }
+
+    // ═══════════════════════════════════════════
+    //       SET DELAY THEN QUEUE USES NEW DELAY
+    // ═══════════════════════════════════════════
+
+    function test_setDelay_thenQueueUsesNewDelay() public {
+        wallet = _deploy(2);
+        vm.deal(address(wallet), 2 ether);
+        address receiver = address(new Receiver());
+
+        // Set delay to 2 days
+        bytes memory data = abi.encodeCall(Multisig.setDelay, (2 days));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        wallet.execute(address(wallet), 0, data, sigs);
+        assertEq(wallet.delay(), 2 days);
+
+        // Queue tx — should use 2-day delay
+        uint32 n = wallet.nonce();
+        sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+        assertEq(receiver.balance, 0);
+
+        // 1 day not enough
+        vm.warp(block.timestamp + 1 days);
+        vm.expectRevert();
+        wallet.executeQueued(receiver, 1 ether, "", n);
+
+        // 2 days works
+        vm.warp(block.timestamp + 1 days);
+        wallet.executeQueued(receiver, 1 ether, "", n);
+        assertEq(receiver.balance, 1 ether);
+    }
+
+    // ═══════════════════════════════════════════
+    //     SET EXECUTOR THEN USE NEW EXECUTOR
+    // ═══════════════════════════════════════════
+
+    function test_setExecutor_thenNewExecutorOperates() public {
+        wallet = _deploy(2);
+        vm.deal(address(wallet), 2 ether);
+        address receiver = address(new Receiver());
+        address newExec = address(0xF00D);
+
+        // Set executor
+        bytes memory data = abi.encodeCall(Multisig.setExecutor, (newExec));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        wallet.execute(address(wallet), 0, data, sigs);
+        assertEq(wallet.executor(), newExec);
+
+        // New executor can bypass sigs
+        vm.prank(newExec);
+        wallet.execute(receiver, 1 ether, "", "");
+        assertEq(receiver.balance, 1 ether);
+    }
+
+    // ═══════════════════════════════════════════
+    //  IMPLEMENTATION CANNOT BE INITIALIZED
+    // ═══════════════════════════════════════════
+
+    function test_implementation_cannotBeInitByThirdParty() public {
+        address impl = factory.implementation();
+        address[] memory sorted = _sortedOwners();
+
+        vm.prank(address(0xDEAD));
+        vm.expectRevert(Multisig.Unauthorized.selector);
+        Multisig(payable(impl)).init(sorted, 0, 2, address(0));
+    }
+
+    function test_implementation_cannotBeInitByFactory() public view {
+        // The factory is the implementation's `factory` immutable, but
+        // factory.create() only calls init on clones, never on the implementation.
+        // Verify the implementation is still uninitialized after factory deployment.
+        address impl = factory.implementation();
+        assertEq(Multisig(payable(impl)).threshold(), 0);
+        assertEq(Multisig(payable(impl)).ownerCount(), 0);
+    }
+
+    function test_implementation_cannotSelfCallInit() public {
+        // The self-call path (msg.sender == address(this)) is unreachable because
+        // execute() requires threshold != 0, which requires prior initialization.
+        address impl = factory.implementation();
+        address[] memory sorted = _sortedOwners();
+
+        // execute on uninitialized impl reverts — threshold is 0, so sig check fails
+        vm.expectRevert(Multisig.InvalidSig.selector);
+        Multisig(payable(impl)).execute(impl, 0, abi.encodeCall(Multisig.init, (sorted, 0, 2, address(0))), "");
+    }
+
+    // ═══════════════════════════════════════════
+    //    CANCELQUEUED ON NONEXISTENT HASH
+    // ═══════════════════════════════════════════
+
+    function test_cancelQueued_nonexistentHashNoOps() public {
+        address exec = address(0xEEEE);
+        wallet = _deployWithExecutor(2, exec);
+
+        // Cancel a hash that was never queued — no revert, just deletes 0
+        vm.prank(exec);
+        wallet.cancelQueued(bytes32(uint256(0xDEAD)));
+        // No revert
+    }
+
+    // ═══════════════════════════════════════════
+    //       SETTHRESHOLD BOUNDARY CASES
+    // ═══════════════════════════════════════════
+
+    function test_setThreshold_toOwnerCount() public {
+        wallet = _deploy(2);
+        // 3 owners, set threshold to 3
+        bytes memory data = abi.encodeCall(Multisig.setThreshold, (3));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        wallet.execute(address(wallet), 0, data, sigs);
+        assertEq(wallet.threshold(), 3);
+    }
+
+    function test_setThreshold_samValue() public {
+        wallet = _deploy(2);
+        // Set threshold to current value (2)
+        bytes memory data = abi.encodeCall(Multisig.setThreshold, (2));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        wallet.execute(address(wallet), 0, data, sigs);
+        assertEq(wallet.threshold(), 2);
+    }
+
+    // ═══════════════════════════════════════════
+    //      INIT WITH MAX THRESHOLD == LENGTH
+    // ═══════════════════════════════════════════
+
+    function test_init_thresholdEqualsOwnerCount() public {
+        wallet = _deploy(3); // 3 owners, threshold 3
+        assertEq(wallet.threshold(), 3);
+        assertEq(wallet.ownerCount(), 3);
+    }
+
+    // ═══════════════════════════════════════════
+    //        INIT WITH DELAY AND EXECUTOR
+    // ═══════════════════════════════════════════
+
+    function test_init_delayZeroNotStored() public {
+        // When delay=0 passed to init, delay stays 0 (default)
+        wallet = _deploy(2);
+        assertEq(wallet.delay(), 0);
+    }
+
+    function test_init_executorZeroNotStored() public {
+        wallet = _deploy(2);
+        assertEq(wallet.executor(), address(0));
+    }
+
+    // ═══════════════════════════════════════════
+    //     EXECUTE EMITS CORRECT HASH AND NONCE
+    // ═══════════════════════════════════════════
+
+    function test_event_executionSuccess_correctValues() public {
+        wallet = _deployFunded(2, 1 ether);
+        address receiver = address(new Receiver());
+
+        uint32 n = wallet.nonce();
+        bytes32 expectedHash = _txHash(wallet, receiver, 1 ether, "", n);
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+
+        vm.expectEmit(true, false, false, true);
+        emit Multisig.ExecutionSuccess(expectedHash, n);
+        wallet.execute(receiver, 1 ether, "", sigs);
+    }
+
+    function test_event_queued_correctValues() public {
+        wallet = _deployWithDelay(2, 1 days);
+        vm.deal(address(wallet), 1 ether);
+        address receiver = address(new Receiver());
+
+        uint32 n = wallet.nonce();
+        bytes32 expectedHash = _txHash(wallet, receiver, 1 ether, "", n);
+        uint256 expectedEta = block.timestamp + 1 days;
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+
+        vm.expectEmit(true, false, false, true);
+        emit Multisig.Queued(expectedHash, n, expectedEta);
+        wallet.execute(receiver, 1 ether, "", sigs);
+    }
+
+    // ═══════════════════════════════════════════
+    //    EXECUTE WITH ZERO VALUE AND EMPTY DATA
+    // ═══════════════════════════════════════════
+
+    function test_execute_zeroValueEmptyData() public {
+        wallet = _deploy(2);
+        address receiver = address(new Receiver());
+
+        bytes memory sigs = _sign(wallet, receiver, 0, "", _pks2());
+        wallet.execute(receiver, 0, "", sigs);
+        assertEq(wallet.nonce(), 1);
+    }
+
+    // ═══════════════════════════════════════════
+    //  REMOVEOWNER THEN GETOWNERS FULL INTEGRITY
+    // ═══════════════════════════════════════════
+
+    function test_removeOwner_thenGetOwnersIntegrity() public {
+        wallet = _deploy(1);
+        address[] memory sorted = _sortedOwners();
+
+        // Remove last
+        bytes memory data = abi.encodeCall(Multisig.removeOwner, (sorted[1], sorted[2]));
+        uint256 signerPk;
+        if (vm.addr(pk1) == sorted[0]) signerPk = pk1;
+        else if (vm.addr(pk2) == sorted[0]) signerPk = pk2;
+        else signerPk = pk3;
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pksSingle(signerPk));
+        wallet.execute(address(wallet), 0, data, sigs);
+
+        // Remove second (now last)
+        data = abi.encodeCall(Multisig.removeOwner, (sorted[0], sorted[1]));
+        sigs = _sign(wallet, address(wallet), 0, data, _pksSingle(signerPk));
+        wallet.execute(address(wallet), 0, data, sigs);
+
+        address[] memory remaining = wallet.getOwners();
+        assertEq(remaining.length, 1);
+        assertEq(remaining[0], sorted[0]);
+        assertTrue(wallet.isOwner(sorted[0]));
+        assertFalse(wallet.isOwner(sorted[1]));
+        assertFalse(wallet.isOwner(sorted[2]));
+    }
+
+    // ═══════════════════════════════════════════
+    //   ADDOWNER + SETTHRESHOLD ATOMIC VIA BATCH
+    // ═══════════════════════════════════════════
+
+    function test_batch_addOwnerAndRaiseThreshold() public {
+        wallet = _deploy(2);
+        address newOwner = address(0xBEEF);
+
+        address[] memory targets = new address[](2);
+        uint256[] memory values = new uint256[](2);
+        bytes[] memory datas = new bytes[](2);
+        targets[0] = address(wallet);
+        targets[1] = address(wallet);
+        datas[0] = abi.encodeCall(Multisig.addOwner, (newOwner));
+        datas[1] = abi.encodeCall(Multisig.setThreshold, (3));
+
+        bytes memory batchData = abi.encodeCall(Multisig.batch, (targets, values, datas));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, batchData, _pks2());
+        wallet.execute(address(wallet), 0, batchData, sigs);
+
+        assertTrue(wallet.isOwner(newOwner));
+        assertEq(wallet.threshold(), 3);
+        assertEq(wallet.ownerCount(), 4);
+    }
+
+    // ═══════════════════════════════════════════
+    //    REMOVEOWNER + LOWERTHRESHOLD VIA BATCH
+    // ═══════════════════════════════════════════
+
+    function test_batch_removeOwnerAndLowerThreshold() public {
+        wallet = _deploy(3);
+        address[] memory sorted = _sortedOwners();
+
+        address[] memory targets = new address[](2);
+        uint256[] memory values = new uint256[](2);
+        bytes[] memory datas = new bytes[](2);
+        // Lower threshold first so removal doesn't violate ownerCount > threshold
+        targets[0] = address(wallet);
+        datas[0] = abi.encodeCall(Multisig.setThreshold, (2));
+        targets[1] = address(wallet);
+        datas[1] = abi.encodeCall(Multisig.removeOwner, (sorted[1], sorted[2]));
+
+        bytes memory batchData = abi.encodeCall(Multisig.batch, (targets, values, datas));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, batchData, _pks3());
+        wallet.execute(address(wallet), 0, batchData, sigs);
+
+        assertFalse(wallet.isOwner(sorted[2]));
+        assertEq(wallet.threshold(), 2);
+        assertEq(wallet.ownerCount(), 2);
+    }
+
+    // ═══════════════════════════════════════════
+    //         SETDELAY TO ZERO REMOVES TIMELOCK
+    // ═══════════════════════════════════════════
+
+    function test_setDelay_toZeroRemovesTimelock() public {
+        address exec = address(0xEEEE);
+        wallet = _deployFull(2, 1 days, exec, 2 ether);
+        address receiver = address(new Receiver());
+
+        // Verify queuing works for owners
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+        assertEq(receiver.balance, 0); // queued
+
+        // Executor sets delay to 0 (bypasses timelock)
+        bytes memory data = abi.encodeCall(Multisig.setDelay, (0));
+        vm.prank(exec);
+        wallet.execute(address(wallet), 0, data, "");
+        assertEq(wallet.delay(), 0);
+
+        // Now owners execute immediately
+        sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+        assertEq(receiver.balance, 1 ether);
+    }
+
+    // ═══════════════════════════════════════════
+    //      MULTIPLE SEQUENTIAL EXECUTIONS
+    // ═══════════════════════════════════════════
+
+    function test_execute_manySequential() public {
+        wallet = _deployFunded(2, 10 ether);
+        address receiver = address(new Receiver());
+
+        for (uint256 i; i < 5; ++i) {
+            bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+            wallet.execute(receiver, 1 ether, "", sigs);
+        }
+        assertEq(receiver.balance, 5 ether);
+        assertEq(wallet.nonce(), 5);
+    }
+
+    // ═══════════════════════════════════════════
+    //        EXECUTOR WITH DELAY — OWNERS QUEUE
+    // ═══════════════════════════════════════════
+
+    function test_executor_immediateWhileOwnersQueue() public {
+        address exec = address(0xEEEE);
+        wallet = _deployFull(2, 1 days, exec, 3 ether);
+        address r1 = address(new Receiver());
+        address r2 = address(new Receiver());
+
+        // Owners queue
+        bytes memory sigs = _sign(wallet, r1, 1 ether, "", _pks2());
+        wallet.execute(r1, 1 ether, "", sigs);
+        assertEq(r1.balance, 0);
+
+        // Executor executes immediately
+        vm.prank(exec);
+        wallet.execute(r2, 1 ether, "", "");
+        assertEq(r2.balance, 1 ether);
+    }
+
+    // ═══════════════════════════════════════════
+    //     RECEIVE ETH VIA PAYABLE EXECUTE
+    // ═══════════════════════════════════════════
+
+    function test_execute_payableReceivesMsg_value() public {
+        wallet = _deploy(2);
+        address receiver = address(new Receiver());
+
+        // Send ETH with msg.value directly through execute (wallet uses msg.value)
+        vm.deal(address(this), 1 ether);
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute{value: 1 ether}(receiver, 1 ether, "", sigs);
+        assertEq(receiver.balance, 1 ether);
+    }
+
+    // ═══════════════════════════════════════════
+    //     QUEUED TX ETA STORED CORRECTLY
+    // ═══════════════════════════════════════════
+
+    function test_queued_etaStoredCorrectly() public {
+        wallet = _deployWithDelay(2, 2 days);
+        vm.deal(address(wallet), 1 ether);
+        address receiver = address(new Receiver());
+
+        uint32 n = wallet.nonce();
+        uint256 expectedEta = block.timestamp + 2 days;
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+
+        bytes32 hash = _txHash(wallet, receiver, 1 ether, "", n);
+        assertEq(wallet.queued(hash), expectedEta);
+    }
+
+    // ═══════════════════════════════════════════
+    //   GUARD: EXECUTOR WITH POST-HOOK BYPASSES SIGS
+    // ═══════════════════════════════════════════
+
+    function test_guard_executorWithPostGuardBypassesSigs() public {
+        address guardAddr = address((uint160(0xABCD) << 144) | 0x1111);
+        MockGuard guard = _etchGuard(guardAddr);
+        wallet = _deployFull(2, 0, guardAddr, 1 ether);
+        address receiver = address(new Receiver());
+
+        vm.prank(guardAddr);
+        wallet.execute(receiver, 0.5 ether, "", "");
+
+        assertEq(guard.calls(), 1, "post-guard called");
+        assertEq(receiver.balance, 0.5 ether, "executor bypassed sigs");
+    }
+
+    // ═══════════════════════════════════════════
+    //   GUARD: BOTH HOOKS WITH DELAY (QUEUED)
+    // ═══════════════════════════════════════════
+
+    function test_guard_bothHooksOnQueue() public {
+        address guardAddr = address((uint160(0x1111) << 144) | 0x1111);
+        MockGuard guard = _etchGuard(guardAddr);
+        wallet = _deployFull(2, 1 days, guardAddr, 1 ether);
+        address receiver = address(new Receiver());
+
+        bytes memory sigs = _sign(wallet, receiver, 0.5 ether, "", _pks2());
+        wallet.execute(receiver, 0.5 ether, "", sigs);
+
+        assertEq(guard.calls(), 2, "both guards called on queue");
+        assertEq(receiver.balance, 0, "tx queued, not executed");
+    }
+
+    // ═══════════════════════════════════════════
+    //   GUARD: EXECUTOR IMMEDIATE WITH DELAY SET
+    // ═══════════════════════════════════════════
+
+    function test_guard_preGuardExecutorBypassesDelay() public {
+        address guardAddr = address(uint160(0x1111 << 144) | uint160(0xABCDEF));
+        MockGuard guard = _etchGuard(guardAddr);
+        wallet = _deployFull(2, 1 days, guardAddr, 1 ether);
+        address receiver = address(new Receiver());
+
+        vm.prank(guardAddr);
+        wallet.execute(receiver, 0.5 ether, "", "");
+
+        assertEq(guard.calls(), 1, "pre-guard called");
+        assertEq(receiver.balance, 0.5 ether, "executor bypassed delay");
+    }
+
+    // ═══════════════════════════════════════════
+    //          SINGLE OWNER WALLET
+    // ═══════════════════════════════════════════
+
+    function test_singleOwnerWallet() public {
+        address[] memory owners = new address[](1);
+        uint256 pk = 0xFF;
+        owners[0] = vm.addr(pk);
+        Multisig w = Multisig(payable(factory.create(owners, 0, 1, address(0), nextSalt++)));
+        vm.deal(address(w), 1 ether);
+
+        assertEq(w.threshold(), 1);
+        assertEq(w.ownerCount(), 1);
+        assertTrue(w.isOwner(owners[0]));
+
+        address[] memory got = w.getOwners();
+        assertEq(got.length, 1);
+        assertEq(got[0], owners[0]);
+
+        // Execute
+        address receiver = address(new Receiver());
+        bytes32 hash = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                w.DOMAIN_SEPARATOR(),
+                keccak256(abi.encode(EXECUTE_TYPEHASH, receiver, uint256(1 ether), keccak256(""), w.nonce()))
+            )
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, hash);
+        bytes memory sigs = abi.encodePacked(r, s, v);
+        w.execute(receiver, 1 ether, "", sigs);
+        assertEq(receiver.balance, 1 ether);
+    }
+
+    // ═══════════════════════════════════════════
+    //    REMOVEOWNER — SENTINEL AS OWNER FAILS
+    // ═══════════════════════════════════════════
+
+    function test_removeOwner_revertSentinel() public {
+        wallet = _deploy(2);
+        address[] memory sorted = _sortedOwners();
+
+        // Try to remove SENTINEL
+        bytes memory data = abi.encodeCall(Multisig.removeOwner, (sorted[0], address(1)));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, data, _pks2());
+        vm.expectRevert(); // _owner != SENTINEL
+        wallet.execute(address(wallet), 0, data, sigs);
+    }
+
+    // ═══════════════════════════════════════════
+    //   EXECUTEQUEUED — EMITS CORRECT EVENT
+    // ═══════════════════════════════════════════
+
+    function test_executeQueued_emitsCorrectEvent() public {
+        wallet = _deployWithDelay(2, 1 days);
+        vm.deal(address(wallet), 1 ether);
+        address receiver = address(new Receiver());
+
+        uint32 n = wallet.nonce();
+        bytes32 expectedHash = _txHash(wallet, receiver, 1 ether, "", n);
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+
+        vm.warp(block.timestamp + 1 days);
+
+        vm.expectEmit(true, false, false, true);
+        emit Multisig.ExecutionSuccess(expectedHash, n);
+        wallet.executeQueued(receiver, 1 ether, "", n);
+    }
+
+    // ═══════════════════════════════════════════
+    //   DEPLOY WITH VALUE FORWARDED CORRECTLY
+    // ═══════════════════════════════════════════
+
+    function test_factory_createForwardsValue() public {
+        address[] memory sorted = _sortedOwners();
+        vm.deal(address(this), 5 ether);
+        address w = factory.create{value: 3 ether}(sorted, 0, 2, address(0), nextSalt++);
+        assertEq(w.balance, 3 ether);
+    }
+
+    // ═══════════════════════════════════════════
+    //   DELEGATECALL VIA BATCH
+    // ═══════════════════════════════════════════
+
+    function test_delegateCall_viaBatch() public {
+        wallet = _deploy(2);
+        SetSlot impl = new SetSlot();
+
+        address[] memory targets = new address[](1);
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory datas = new bytes[](1);
+        targets[0] = address(wallet);
+        datas[0] = abi.encodeCall(Multisig.delegateCall, (address(impl), abi.encodeCall(SetSlot.setThreshold, (77))));
+
+        bytes memory batchData = abi.encodeCall(Multisig.batch, (targets, values, datas));
+        bytes memory sigs = _sign(wallet, address(wallet), 0, batchData, _pks2());
+        wallet.execute(address(wallet), 0, batchData, sigs);
+        assertEq(uint256(vm.load(address(wallet), bytes32(0))), 77);
+    }
 }

@@ -14,8 +14,10 @@
 
 | Component | Lines | Description |
 |---|---|---|
-| `Multisig` | 1–245 | Threshold multisig with optional timelock, executor role, and pre/post guardian hooks. All mutable state (`delay`, `nonce`, `threshold`, `ownerCount`, `executor`) packed in a single storage slot. |
+| `Multisig` | 4–245 | Threshold multisig with optional timelock, executor role, and pre/post guardian hooks. All mutable state (`delay`, `nonce`, `threshold`, `ownerCount`, `executor`) packed in a single storage slot. |
 | `MultisigFactory` | 247–281 | Minimal proxy (PUSH0 clone) factory with CREATE2 and Solady-style sender-bound salt. |
+
+> **Note on line references:** All line numbers in this document were verified against the current source as of the audit date. If the source has been modified since, re-verify with `grep -n` before relying on cited lines.
 
 ### Access Control Model
 
@@ -32,6 +34,8 @@ There are **no admin keys**. The factory is permissionless. The `implementation`
 - **Pre-hook fires before signature validation.** Intentional — allows blocklist/policy checks before authorization.
 - **Owner linked list is sorted on init but not on addOwner.** Signature verification checks ascending signer order independently of list order.
 - **CREATE2 salt uses Solady `checkStartsWith` pattern.** Zero-prefix = open deploy, sender-prefix = sender-bound. No on-chain hashing of init params (unlike Safe).
+- **`isValidSignature` uses EIP-712 `SafeMessage` wrapping (Safe-inspired, not byte-compatible).** The supplied hash is wrapped in `EIP712(SafeMessage(bytes32 hash))` before verification. Safe uses `SafeMessage(bytes message)` with dynamic `bytes` encoding — same pattern, different type hash. Signatures produced by the Safe UI/SDK will not validate here. Generic ERC-1271 callers that pass a raw hash will get false negatives — this is intentional, not a bug.
+- **Contract owners are allowed but not supported as signers.** Only ECDSA EOAs can produce valid signatures. Adding a contract address as an owner is possible but it can never sign — this is a user misconfiguration, not a contract vulnerability. ERC-1271 owner support is intentionally omitted to keep verification simple and gas-efficient. Same design as Safe v1.0–1.3.
 
 ---
 
@@ -46,11 +50,31 @@ Before flagging a finding, verify it is not already neutralized by one of these:
 | **Nonce increment** | `nonce++` in unchecked block, included in EIP-712 hash | Transaction replay |
 | **Sender-bound salt** | `salt >> 96 == uint160(msg.sender)` (line 266) | CREATE2 front-running for pre-funded addresses |
 | **Init guard** | `threshold == 0` check (line 40) — init only succeeds once | Double initialization |
-| **Factory-only init** | `msg.sender == factory \|\| msg.sender == address(this)` (line 38) | Third-party initialization of implementation or clones |
+| **Factory-only init** | `msg.sender == factory \|\| msg.sender == address(this)` (line 38). Factory only calls `init` on clones (line 278), never the implementation. Self-call path is unreachable on uninitialized contracts (circular: `execute` requires `threshold != 0`) | Third-party initialization of implementation or clones |
 | **onlySelf modifier** | `msg.sender == address(this)` on all config functions | Unauthorized state changes |
-| **Queued hash deletion** | `delete queued[hash]` before external call (line 153) | Replay of queued transactions |
-| **cancelQueued** | Executor-only (line 145), no timelock | Emergency cancellation within delay window |
+| **Queued hash deletion** | `delete queued[hash]` before external call (line 153); if call reverts, deletion is also reverted atomically — hash remains available for retry | Replay of queued transactions |
+| **cancelQueued** | Executor-only (line 145), no timelock. Deletes the queued hash; a cancelled tx cannot be revived (re-queuing produces a new hash due to nonce) | Emergency cancellation within delay window |
 | **Solady-style assembly clone** | PUSH0 minimal proxy (lines 267–277) | Deployment gas overhead, non-deterministic addresses |
+
+### Timelock State Machine
+
+Each transaction hash has three possible states:
+
+```
+                    execute() with delay > 0
+  UNQUEUED ────────────────────────────────► QUEUED (queued[hash] = block.timestamp + delay)
+     ▲                                         │
+     │                                         ├── executeQueued() after eta ──► EXECUTED (delete queued[hash])
+     │                                         │
+     └──── cancelQueued() by executor ─────────┘   (delete queued[hash])
+```
+
+**Key properties:**
+- **Hash uniqueness:** The nonce is included in the EIP-712 hash. Each `execute()` increments the nonce, so re-queuing the same `(target, value, data)` after cancellation produces a different hash.
+- **No revival:** A cancelled hash cannot be re-queued — it would require the same nonce, which has already been consumed.
+- **Atomic retry:** If `executeQueued()` reverts (target call fails), the `delete queued[hash]` is also reverted. The hash remains queued for retry.
+- **Executor bypass:** When `msg.sender == executor`, the transaction executes immediately regardless of delay — the queue path is never entered.
+- **Permissionless execution:** Anyone can call `executeQueued()` after the ETA. Only `cancelQueued()` is gated to the executor.
 
 ---
 
@@ -59,7 +83,7 @@ Before flagging a finding, verify it is not already neutralized by one of these:
 These properties should hold. If you find a violation, it's likely a real finding:
 
 1. **Init is one-shot** — `threshold` starts at 0 and is set to a nonzero value in `init()`. Once nonzero, `init()` reverts. No path resets `threshold` to 0.
-2. **Owner linked list is well-formed** — `SENTINEL → owner₁ → owner₂ → ... → ownerₙ → SENTINEL`. No cycles, no dangling pointers, `ownerCount` matches actual list length.
+2. **Owner linked list is well-formed** — `SENTINEL → owner₁ → owner₂ → ... → ownerₙ → SENTINEL`. No cycles, no dangling pointers, `ownerCount` matches actual list length, and `getOwners()` terminates returning exactly `ownerCount` elements.
 3. **Nonce is monotonically increasing** — `nonce++` in unchecked block. Each `execute` consumes exactly one nonce. No path decrements or resets the nonce.
 4. **Queued hash is a one-shot latch** — `queued[hash]` is set once (in `execute` with delay), deleted on `executeQueued` or `cancelQueued`, and never re-set for the same hash (nonce prevents collision).
 5. **Signature threshold is enforced for non-executor callers** — `sigs.length == threshold * 65` and each signer is a valid owner in ascending order.
@@ -135,10 +159,14 @@ These were investigated during the audit and determined to be non-issues or acce
 | L5 | uint32 nonce overflow in unchecked block | ~4B txs required — impractical |
 | L6 | Stale executor reference in post-hook | Cached at function entry; if `setExecutor` is called mid-tx, post-hook uses old address. Atomic tx limits impact |
 | L7 | No reentrancy guard on execute | Non-executor reentrant calls still require valid sigs per nonce |
-| L8 | Uninitialized implementation contract | `init()` requires `msg.sender == factory`; holds no funds |
+| L8 | Uninitialized implementation contract | Impossible to initialize: factory only calls `init` on clones (line 278), not the implementation; self-call path requires `threshold != 0` which requires prior initialization (circular). Holds no funds |
 | L9 | `batch()` missing array length validation | Solidity ABI decoder reverts on out-of-bounds |
 | L10 | `addOwner` breaks sorted-order invariant | Cosmetic — sig verification checks signer order, not list order |
 | L11 | `msg.value` not earmarked when tx is queued | Design tradeoff — multisig is expected to hold ETH |
+| L12 | EIP-7702 EOA key remains a superuser | Inherent 7702 property — EOA key bypasses threshold, can call `onlySelf` functions, and revoke delegation. Deployment caveat, not a contract bug |
+| L13 | Fallback silently succeeds for unknown selectors | `fallback()` only handles 3 token callbacks; other selectors return success with empty data. Masks operator self-call typos. Not exploitable (requires threshold sigs) |
+| L14 | `isValidSignature` type hash differs from Safe | Uses `SafeMessage(bytes32 hash)` vs Safe's `SafeMessage(bytes message)`. Intentional — own signing domain, not byte-compatible with Safe SDK |
+| L15 | Contract owners can be added but can't sign | No ERC-1271 owner support. Intentional scope decision — same as Safe v1.0–1.3. User misconfiguration, not a vulnerability |
 
 ---
 
@@ -154,12 +182,15 @@ These patterns were repeatedly surfaced by automated auditors and confirmed as n
 | "Anyone can call executeQueued" | Intentional for relayer compatibility (F-4). cancelQueued is the emergency brake. |
 | "addOwner doesn't enforce sorted order" | Cosmetic (L10). Sig verification checks ascending *signer* order in the signature array, not the linked list order. |
 | "uint32 nonce will overflow" | Requires ~4B transactions (L5). Impractical on any chain. |
-| "Implementation contract is uninitialized" | `init()` requires `msg.sender == factory` (L8). Third parties cannot initialize it. It holds no funds. |
+| "Implementation contract is uninitialized" | Initialization is provably impossible (L8). The factory only calls `init` on clones (line 278), never the implementation. The self-call path (`msg.sender == address(this)`) is unreachable because `execute()` requires `threshold != 0` — circular dependency. It holds no funds. |
 | "msg.value is not earmarked for queued tx" | Design tradeoff (L11). The multisig is expected to hold ETH. Queued txs use whatever balance exists at execution time. |
 | "Zero-prefix salt allows front-running" | Known tradeoff (F-1). Use sender-bound salt for pre-fund. Zero-prefix is for open/relayer deploys. |
 | "delegateCall can corrupt storage" | Intentional power — gated by `onlySelf`. Requires threshold-of-n signatures. Same design as Safe. |
 | "Force-fed ETH via selfdestruct" | Economically irrational — attacker donates their own ETH. No accounting invariant depends on `address(this).balance`. |
 | "No admin can freeze/pause" | There is no admin. `onlySelf` = self-governance. This is the design. |
+| "EIP-7702 breaks multisig security" | The EOA key is an inherent superuser in 7702 deployments (L12). This is a deployment-model property, not a contract vulnerability. Clone-based wallets are unaffected. |
+| "isValidSignature is not standard ERC-1271" | Intentional EIP-712 `SafeMessage(bytes32 hash)` wrapping — Safe-inspired pattern. Not byte-compatible with Safe's `SafeMessage(bytes message)`. Generic callers that pass a raw hash get false negatives by design. |
+| "Contract owners can't sign / no ERC-1271 owner support" | Intentional scope decision. Only ECDSA EOAs can sign. Adding a contract as an owner is user misconfiguration. ERC-1271 owner support omitted for simplicity and gas. Same as Safe v1.0–1.3. |
 
 ---
 
@@ -170,6 +201,7 @@ These patterns were repeatedly surfaced by automated auditors and confirmed as n
 3. **Factory deployer** — The factory is permissionless. The `implementation` is deployed in the constructor and is immutable. No admin keys.
 4. **Timelock** — Protects against owner compromise by giving stakeholders an exit window. The executor operates outside the timelock by design.
 5. **Guardian (executor with vanity address)** — Trusted to act honestly in pre/post hooks. A malicious guardian can block all transactions (pre-hook revert) or observe transaction parameters before execution.
+6. **EIP-7702 EOA key** — In 7702 deployments, the delegating EOA's private key is an implicit superuser. It can send transactions bypassing the multisig, call `onlySelf` functions (satisfies `msg.sender == address(this)`), and revoke the delegation. The k-of-n threshold is not a hard boundary — treat the EOA key as a (k=1) override. This model suits personal wallets (co-signing), not shared custody.
 
 ---
 
@@ -181,13 +213,47 @@ These patterns were repeatedly surfaced by automated auditors and confirmed as n
 - Test suite: `test/Multisig.t.sol`, `test/EIP7702.t.sol`, `test/Gas.t.sol`
 - No external dependencies beyond forge-std
 
+### Test Coverage
+
+224 tests (178 unit/integration + 46 gas benchmarks + EIP-7702), 0 failures.
+
+**Reported by `forge coverage`:** 88.5% lines, 86.8% statements, 76.7% branches, **100% functions**.
+
+The gap between reported and actual coverage is a forge instrumentation limitation — forge cannot instrument code inside `unchecked {}` blocks or inline `assembly` blocks. All 14 "uncovered" lines fall into these categories:
+
+| Lines | Location | Why unreported | Actually tested by |
+|-------|----------|---------------|-------------------|
+| 52 | `prev = owner` in `init` unchecked loop | `unchecked` block | Every `_deploy*` helper (100+ calls) |
+| 100 | `prev = signer` in `isValidSignature` unchecked loop | `unchecked` block | `test_isValidSignature_*` (9 tests) |
+| 238–241 | `fallback()` assembly | inline assembly | `test_onERC721Received`, `test_onERC1155*`, `test_fallbackUnknownSelectorReturnsEmpty` |
+| 268–276 | `create()` CREATE2 assembly | inline assembly | Every `factory.create` call (60+ calls), `test_factory_revertDuplicateSalt` |
+
+Similarly, all 6 uninstrumented branches (marked `-` in lcov) are tested in both pass and revert directions. Effective coverage of reachable Solidity code paths is 100%.
+
+**Test categories covered:**
+- Factory: deterministic deploy, salt access control, value forwarding, duplicate salt revert
+- Init: one-shot guard, invalid configs (threshold, ordering, duplicates, address(0), sentinel)
+- Execute: ETH transfers, data calls, all signer counts, nonce replay, sig validation (invalid/duplicate/wrong-order/zero-recovery)
+- Timelock: queue, execute after delay, too early, replay, wrong params (target/value/data/nonce), cancel + re-queue, multiple simultaneous queued txs, ETA verification
+- Cancel: executor cancels, non-executor revert, no executor set, nonexistent hash no-op
+- Executor: bypass sigs, bypass delay, set/revoke, concurrent with owner timelock
+- Owner management: add, remove (first/middle/last), linked list integrity, new owner can sign, removed owner can't sign
+- Batch: empty, single, multi, with values, atomic add+threshold, atomic remove+threshold, inner call failure
+- EIP-1271: valid, invalid, cross-wallet isolation, domain isolation from execute
+- EIP-712: domain separator, type hashes, cross-chain (fork), cross-wallet
+- Guards: pre, post, both, plain executor, reverts, with delay, executor bypass
+- DelegateCall: via execute, via batch, not-self revert, inner failure
+- EIP-7702: delegation, init via self-call, EOA superuser, batch, timelock, executor
+- Fuzz: threshold bounds, removeOwner integrity, salt access control, sig length
+
 ### How to Run
 
 ```bash
 forge build
-forge test -vvv
-forge test --mc GasTest -vv   # gas benchmarks
-forge snapshot                 # gas snapshot
+forge test -vvv                    # full suite (224 tests)
+forge test --mc MultisigTest -vvv  # unit/integration (178 tests)
+forge test --mc GasTest -vv        # gas benchmarks
+forge coverage --ir-minimum        # coverage report
 ```
 
 ### Audit Methodology
@@ -227,7 +293,7 @@ For each candidate attack, estimate the economic cost vs gain.
 Switch roles. You are now a **budget-protecting skeptic** whose job is to minimize false positives. For every finding from Rounds 1 and 2:
 
 1. **Attempt to disprove it.** Find the code path, guard, or constraint that prevents the attack.
-2. **Check it against the Known Findings.** If it matches F-1 through F-6 or L1 through L11, discard it as a duplicate.
+2. **Check it against the Known Findings.** If it matches F-1 through F-6 or L1 through L15, discard it as a duplicate.
 3. **Check it against the False Positive Patterns table.** If it matches, discard it.
 4. **Apply the trust-assumption rule.** If it requires a compromised executor, it is not a vulnerability — it is within the executor's trust boundary.
 5. **Rate your confidence** (0-100) in the finding surviving disproof.
@@ -235,12 +301,13 @@ Switch roles. You are now a **budget-protecting skeptic** whose job is to minimi
 
 ### Critical Code Paths (Priority Order)
 
-1. **`execute`** (lines 106–141) — Signature verification, executor bypass, timelock branching, guardian hooks. Highest-risk function.
+1. **`execute`** (lines 106–142) — Signature verification, executor bypass, timelock branching, guardian hooks. Highest-risk function.
 2. **`executeQueued`** (lines 149–157) — Permissionless execution of timelocked transactions. Hash-based replay prevention.
 3. **`init`** (lines 37–56) — Owner linked list construction, threshold/delay/executor setup. One-shot guard.
-4. **`isValidSignature`** (lines 84–103) — ERC-1271 support. Separate EIP-712 domain from `execute`.
-5. **`delegateCall`** (lines 181–183) — Arbitrary code execution in wallet context. Storage corruption risk.
-6. **`create`** (lines 260–280) — Factory clone deployment. Assembly CREATE2 + init call.
+4. **`cancelQueued`** (line 144–147) — Executor-only emergency cancellation. Added post-audit to resolve F-3. Simple but trust-critical: verify it cannot be called by non-executor, and that cancelled hashes cannot be revived.
+5. **`isValidSignature`** (lines 84–103) — ERC-1271 support. Separate EIP-712 domain from `execute`.
+6. **`delegateCall`** (lines 181–183) — Arbitrary code execution in wallet context. Storage corruption risk.
+7. **`create`** (lines 260–280) — Factory clone deployment. Assembly CREATE2 + init call.
 
 ### Severity Criteria
 

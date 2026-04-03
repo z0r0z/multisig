@@ -61,7 +61,7 @@
   <rect class="inner" x="625" y="62" width="240" height="135" rx="4"/>
   <text class="label" x="635" y="80">Admin (onlySelf)</text>
   <text class="small" x="645" y="98">addOwner(address)</text>
-  <text class="small" x="645" y="114">removeOwner(address)</text>
+  <text class="small" x="645" y="114">removeOwner(prev, owner)</text>
   <text class="small" x="645" y="130">setThreshold(uint256)</text>
   <text class="small" x="645" y="146">setDelay(uint32)</text>
   <text class="small" x="645" y="162">setExecutor(address)</text>
@@ -101,41 +101,41 @@
   <text class="label" x="35" y="458">Slot 0</text>
   <text class="tiny" x="35" y="472">256 bits</text>
 
-  <rect class="slot" x="100" y="444" width="310" height="34" rx="3"/>
-  <text class="small" x="255" y="465" text-anchor="middle">address executor (160 bits)</text>
+  <rect class="slot" x="100" y="444" width="250" height="34" rx="3"/>
+  <text class="small" x="225" y="465" text-anchor="middle">address executor (160 bits)</text>
 
-  <rect class="slot" x="414" y="444" width="80" height="34" rx="3"/>
-  <text class="small" x="454" y="465" text-anchor="middle">u16 thresh</text>
+  <rect class="slot" x="354" y="444" width="60" height="34" rx="3"/>
+  <text class="small" x="384" y="465" text-anchor="middle">u16 cnt</text>
 
-  <rect class="slot" x="498" y="444" width="140" height="34" rx="3"/>
-  <text class="small" x="568" y="465" text-anchor="middle">uint48 nonce</text>
+  <rect class="slot" x="418" y="444" width="60" height="34" rx="3"/>
+  <text class="small" x="448" y="465" text-anchor="middle">u16 thresh</text>
 
-  <rect class="slot" x="642" y="444" width="120" height="34" rx="3"/>
-  <text class="small" x="702" y="465" text-anchor="middle">uint32 delay</text>
+  <rect class="slot" x="482" y="444" width="120" height="34" rx="3"/>
+  <text class="small" x="542" y="465" text-anchor="middle">uint32 nonce</text>
+
+  <rect class="slot" x="606" y="444" width="120" height="34" rx="3"/>
+  <text class="small" x="666" y="465" text-anchor="middle">uint32 delay</text>
 
   <!-- Bit position labels -->
   <text class="tiny" x="100" y="496">255</text>
-  <text class="tiny" x="388" y="496">96</text>
-  <text class="tiny" x="414" y="496">95</text>
-  <text class="tiny" x="478" y="496">80</text>
-  <text class="tiny" x="498" y="496">79</text>
-  <text class="tiny" x="624" y="496">32</text>
-  <text class="tiny" x="642" y="496">31</text>
-  <text class="tiny" x="752" y="496">0</text>
+  <text class="tiny" x="330" y="496">96</text>
+  <text class="tiny" x="354" y="496">95</text>
+  <text class="tiny" x="398" y="496">80</text>
+  <text class="tiny" x="418" y="496">79</text>
+  <text class="tiny" x="462" y="496">64</text>
+  <text class="tiny" x="482" y="496">63</text>
+  <text class="tiny" x="586" y="496">32</text>
+  <text class="tiny" x="606" y="496">31</text>
+  <text class="tiny" x="716" y="496">0</text>
 
   <!-- Slot 1 -->
   <text class="label" x="35" y="530">Slot 1</text>
   <rect class="slot" x="100" y="516" width="662" height="24" rx="3"/>
-  <text class="small" x="431" y="532" text-anchor="middle">address[] owners .length</text>
+  <text class="small" x="431" y="532" text-anchor="middle">mapping(address =&gt; address) _owners (sorted linked list)</text>
 
   <!-- Slot 2 -->
   <text class="label" x="35" y="562">Slot 2</text>
   <rect class="slot" x="100" y="548" width="662" height="24" rx="3"/>
-  <text class="small" x="431" y="564" text-anchor="middle">mapping(address =&gt; bool) isOwner</text>
-
-  <!-- Slot 3 -->
-  <text class="label" x="35" y="594">Slot 3</text>
-  <rect class="slot" x="100" y="580" width="662" height="24" rx="3"/>
-  <text class="small" x="431" y="596" text-anchor="middle">mapping(bytes32 =&gt; uint256) queued</text>
+  <text class="small" x="431" y="564" text-anchor="middle">mapping(bytes32 =&gt; uint256) queued</text>
 
 </svg>

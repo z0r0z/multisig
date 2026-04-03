@@ -64,5 +64,5 @@
 
   <!-- Storage slot footer -->
   <line x1="20" y1="414" x2="380" y2="414" stroke="#333"/>
-  <text x="200" y="432" text-anchor="middle" font-size="8" fill="#666">slot 0: delay(32) | nonce(48) | threshold(16) | executor(160)</text>
+  <text x="200" y="432" text-anchor="middle" font-size="8" fill="#666">slot 0: delay(32) | nonce(32) | threshold(16) | ownerCount(16) | executor(160)</text>
 </svg>

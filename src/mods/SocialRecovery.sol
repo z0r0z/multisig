@@ -36,6 +36,7 @@ contract SocialRecovery {
 
     function propose(address multisig, address target, uint256 value, bytes calldata data) public {
         require(isGuardian[multisig][msg.sender], Unauthorized());
+        require(pending[multisig] == bytes32(0) || block.timestamp >= eta[multisig], NotReady());
         bytes32 hash = keccak256(abi.encode(target, value, data));
         uint256 _eta = block.timestamp + delay[multisig];
         pending[multisig] = hash;

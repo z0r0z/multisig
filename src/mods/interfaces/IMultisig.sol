@@ -7,4 +7,5 @@ interface IMultisig {
     function isOwner(address account) external view returns (bool);
     function threshold() external view returns (uint16);
     function ownerCount() external view returns (uint16);
+    function getOwners() external view returns (address[] memory);
 }

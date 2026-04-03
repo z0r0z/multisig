@@ -1,5 +1,5 @@
 # AllowlistGuard
-[Git Source](https://github.com/z0r0z/multisig/blob/721bcd678965bd869b51578350a71b451e155085/src/mods/AllowlistGuard.sol)
+[Git Source](https://github.com/z0r0z/multisig/blob/cc44c047f803ce7557afb7fae62a8a291e204efe/src/mods/AllowlistGuard.sol)
 
 Pre-transaction guard that whitelists (target, selector) pairs.
 Deploy at a vanity address with leading 0x1111 to activate as pre-guard.
@@ -26,6 +26,7 @@ constructor() payable;
 
 Called by multisig as pre-guard. Calls targeting the guard itself
 are always allowed so owners can configure the allowlist after activation.
+Plain ETH transfers (empty calldata) require allowlisting bytes4(0).
 
 
 ```solidity

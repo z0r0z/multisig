@@ -108,7 +108,7 @@ Singleton module contracts in `src/mods/` demonstrate common patterns — each i
 
 | Feature | This Multisig | Safe |
 |---|---|---|
-| **Core LOC** | 318 (single file) | ~3,500 (multiple files) |
+| **Core LOC** | 317 (single file) | ~3,500 (multiple files) |
 | **Runtime bytecode** | ~10 KB | ~23 KB |
 | **Proxy clone size** | 45 bytes (PUSH0) | 45 bytes (EIP-1167) |
 | **Storage: core state** | 1 slot (packed) | Multiple slots |

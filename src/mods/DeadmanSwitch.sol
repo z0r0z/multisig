@@ -11,6 +11,7 @@ contract DeadmanSwitch {
     event Claimed(address indexed multisig, address indexed beneficiary, uint256 amount);
     event Configured(address indexed multisig, address indexed beneficiary, uint256 timeout);
 
+    error InvalidConfig();
     error StillAlive();
     error Unauthorized();
 
@@ -30,6 +31,7 @@ contract DeadmanSwitch {
     }
 
     function configure(address _beneficiary, uint256 _timeout) public {
+        require(uint160(address(this)) & 0xFFFF == 0x1111, InvalidConfig());
         configs[msg.sender] = Config(_beneficiary, _timeout, block.timestamp);
         emit Configured(msg.sender, _beneficiary, _timeout);
     }

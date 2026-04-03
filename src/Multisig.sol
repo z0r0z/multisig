@@ -61,14 +61,13 @@ contract Multisig {
         return account != SENTINEL && _owners[account] != address(0);
     }
 
-    function getOwners() public view returns (address[] memory) {
-        address[] memory arr = new address[](ownerCount);
+    function getOwners() public view returns (address[] memory owners) {
+        owners = new address[](ownerCount);
         address current = _owners[SENTINEL];
         for (uint256 i; current != SENTINEL; ++i) {
-            arr[i] = current;
+            owners[i] = current;
             current = _owners[current];
         }
-        return arr;
     }
 
     function DOMAIN_SEPARATOR() public view returns (bytes32) {
@@ -125,7 +124,7 @@ contract Multisig {
                 } else {
                     signer = ecrecover(safe, uint8(sigs[o + 64]), bytes32(sigs[o:o + 32]), bytes32(sigs[o + 32:o + 64]));
                 }
-                require(signer != address(0) && _owners[signer] != address(0) && signer > prev, InvalidSig());
+                require(signer > SENTINEL && _owners[signer] != address(0) && signer > prev, InvalidSig());
                 prev = signer;
             }
             return this.isValidSignature.selector;
@@ -153,7 +152,7 @@ contract Multisig {
                         signer =
                             ecrecover(hash, uint8(sigs[o + 64]), bytes32(sigs[o:o + 32]), bytes32(sigs[o + 32:o + 64]));
                     }
-                    require(signer != address(0) && _owners[signer] != address(0) && signer > prev, InvalidSig());
+                    require(signer > SENTINEL && _owners[signer] != address(0) && signer > prev, InvalidSig());
                     prev = signer;
                 }
             }

@@ -14,8 +14,8 @@
 
 | Component | Lines | Description |
 |---|---|---|
-| `Multisig` | 4–262 | Threshold multisig with optional timelock, executor role, pre/post guardian hooks, and onchain approvals. All mutable state (`delay`, `nonce`, `threshold`, `ownerCount`, `executor`) packed in a single storage slot. |
-| `MultisigFactory` | 264–318 | Minimal proxy (PUSH0 clone) factory with CREATE2, Solady-style sender-bound salt, and `createWithCalls` for atomic module setup. |
+| `Multisig` | 4–261 | Threshold multisig with optional timelock, executor role, pre/post guardian hooks, and onchain approvals. All mutable state (`delay`, `nonce`, `threshold`, `ownerCount`, `executor`) packed in a single storage slot. |
+| `MultisigFactory` | 263–317 | Minimal proxy (PUSH0 clone) factory with CREATE2, Solady-style sender-bound salt, and `createWithCalls` for atomic module setup. |
 
 > **Note on line references:** All line numbers in this document were verified against the current source as of the audit date. If the source has been modified since, re-verify with `grep -n` before relying on cited lines.
 
@@ -47,7 +47,7 @@ Before flagging a finding, verify it is not already neutralized by one of these:
 
 | Defense | Mechanism | What It Prevents |
 |---------|-----------|-----------------|
-| **Ascending signer order** | `signer > prev` check in ecrecover loop (lines 123, 99) | Duplicate signers, signature replay within a single call |
+| **Ascending signer order** | `signer > prev` check in sig loop (lines 127, 155) | Duplicate signers, signature replay within a single call |
 | **EIP-712 domain separation** | `DOMAIN_SEPARATOR()` includes `address(this)` and `chainId` | Cross-chain replay, cross-wallet replay |
 | **Nonce increment** | `nonce++` in unchecked block, included in EIP-712 hash | Transaction replay |
 | **Sender-bound salt** | `salt >> 96 == uint160(msg.sender)` (line 266) | CREATE2 front-running for pre-funded addresses |
@@ -59,7 +59,7 @@ Before flagging a finding, verify it is not already neutralized by one of these:
 | **Onchain approval ownership check** | `isOwner(msg.sender)` in `approve()`, `_owners[signer] != address(0)` in sig loop | Non-owners approving, removed owners using stale approvals |
 | **Sender bypass limited to one** | Only one `v=0` slot can match `msg.sender` per `execute` call; others require prior `approve` | Impersonating multiple signers via sender bypass |
 | **Approval revocation** | `approve(hash, false)` sets `approved[owner][hash] = false` | Owner changing their mind before quorum is reached |
-| **Solady-style assembly clone** | PUSH0 minimal proxy (lines 284–294) | Deployment gas overhead, non-deterministic addresses |
+| **Solady-style assembly clone** | PUSH0 minimal proxy (lines 283–293) | Deployment gas overhead, non-deterministic addresses |
 
 ### Timelock State Machine
 
@@ -214,7 +214,7 @@ These patterns were repeatedly surfaced by automated auditors and confirmed as n
 
 ### Scope
 
-- `src/Multisig.sol` — single file, ~318 lines, contains both `Multisig` and `MultisigFactory`
+- `src/Multisig.sol` — single file, ~317 lines, contains both `Multisig` and `MultisigFactory`
 - `src/mods/` — singleton module contracts (AllowlistGuard, SpendingAllowance, SocialRecovery, DeadmanSwitch, CancelTx)
 - Test suite: `test/Multisig.t.sol`, `test/Mods.t.sol`, `test/EIP7702.t.sol`, `test/Gas.t.sol`
 - No external dependencies beyond forge-std
@@ -314,15 +314,15 @@ Switch roles. You are now a **budget-protecting skeptic** whose job is to minimi
 
 ### Critical Code Paths (Priority Order)
 
-1. **`execute`** (lines 141–181) — Signature verification (ECDSA + onchain approval + sender bypass), executor bypass, timelock branching, guardian hooks. Highest-risk function.
-2. **`approve`** (lines 74–78) — Onchain approval/revocation. Owner-gated. Verify removed owners can't use stale approvals (checked in sig loop via `_owners[signer]`).
-3. **`executeQueued`** (lines 188–196) — Permissionless execution of timelocked transactions. Hash-based replay prevention.
+1. **`execute`** (lines 134–174) — Signature verification (ECDSA + onchain approval + sender bypass), executor bypass, timelock branching, guardian hooks. Highest-risk function.
+2. **`approve`** (lines 176–180) — Onchain approval/revocation. Owner-gated. Verify removed owners can't use stale approvals (checked in sig loop via `_owners[signer]`).
+3. **`executeQueued`** (lines 187–195) — Permissionless execution of timelocked transactions. Hash-based replay prevention.
 4. **`init`** (lines 39–58) — Owner linked list construction, threshold/delay/executor setup. One-shot guard.
-5. **`cancelQueued`** (lines 183–186) — Executor-only emergency cancellation. Added post-audit to resolve F-3. Simple but trust-critical: verify it cannot be called by non-executor, and that cancelled hashes cannot be revived.
-6. **`isValidSignature`** (lines 114–139) — ERC-1271 support. Separate EIP-712 domain from `execute`. Supports onchain approvals (no sender bypass — `view` function).
-7. **`delegateCall`** (lines 198–201) — Arbitrary code execution in wallet context. Storage corruption risk.
-8. **`create`** (lines 277–297) — Factory clone deployment. Assembly CREATE2 + init call.
-9. **`createWithCalls`** (lines 302–317) — Atomic deploy + module setup. Temporary factory-as-executor pattern.
+5. **`cancelQueued`** (lines 182–185) — Executor-only emergency cancellation. Added post-audit to resolve F-3. Simple but trust-critical: verify it cannot be called by non-executor, and that cancelled hashes cannot be revived.
+6. **`isValidSignature`** (lines 107–132) — ERC-1271 support. Separate EIP-712 domain from `execute`. Supports onchain approvals (no sender bypass — `view` function).
+7. **`delegateCall`** (lines 197–200) — Arbitrary code execution in wallet context. Storage corruption risk.
+8. **`create`** (lines 276–296) — Factory clone deployment. Assembly CREATE2 + init call.
+9. **`createWithCalls`** (lines 301–316) — Atomic deploy + module setup. Temporary factory-as-executor pattern.
 
 ### Severity Criteria
 

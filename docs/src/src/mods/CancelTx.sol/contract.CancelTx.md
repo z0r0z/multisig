@@ -1,11 +1,14 @@
 # CancelTx
-[Git Source](https://github.com/z0r0z/multisig/blob/721bcd678965bd869b51578350a71b451e155085/src/mods/CancelTx.sol)
+[Git Source](https://github.com/z0r0z/multisig/blob/cc44c047f803ce7557afb7fae62a8a291e204efe/src/mods/CancelTx.sol)
 
 Executor module for queued transaction management. Cancel requires
 threshold approvals (symmetric with signing). Fast-forward requires
 all owners (unanimous) since it bypasses the timelock protection.
 Fast-forward is opt-in — the multisig must call enableForward(true).
 Singleton — one deployment serves all multisigs.
+Votes are validated against the current owner set at trigger time —
+removed owners' votes are ignored. Votes are cleared after execution
+to prevent replay.
 
 
 ## State Variables
@@ -13,13 +16,6 @@ Singleton — one deployment serves all multisigs.
 
 ```solidity
 mapping(address multisig => mapping(bytes32 hash => mapping(address owner => bool))) public cancelVoted
-```
-
-
-### cancelVotes
-
-```solidity
-mapping(address multisig => mapping(bytes32 hash => uint256)) public cancelVotes
 ```
 
 
@@ -34,13 +30,6 @@ mapping(address multisig => bool) public forwardEnabled
 
 ```solidity
 mapping(address multisig => mapping(bytes32 id => mapping(address owner => bool))) public forwardVoted
-```
-
-
-### forwardVotes
-
-```solidity
-mapping(address multisig => mapping(bytes32 id => uint256)) public forwardVotes
 ```
 
 
@@ -61,7 +50,8 @@ function enableForward(bool enabled) public;
 
 ### cancel
 
-Owners approve cancellation of a queued tx. Auto-cancels at threshold.
+Owners approve cancellation of a queued tx. Auto-cancels at threshold
+among current owners — stale votes from removed owners are ignored.
 
 
 ```solidity
@@ -70,7 +60,8 @@ function cancel(address multisig, bytes32 hash) public;
 
 ### forward
 
-Owners approve immediate execution, bypassing timelock. Auto-executes when all owners have approved.
+Owners approve immediate execution, bypassing timelock. Auto-executes
+when all current owners have approved. Votes cleared after execution.
 
 
 ```solidity

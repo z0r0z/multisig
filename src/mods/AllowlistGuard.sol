@@ -16,6 +16,7 @@ contract AllowlistGuard {
 
     /// @dev Called by multisig as pre-guard. Calls targeting the guard itself
     /// are always allowed so owners can configure the allowlist after activation.
+    /// Plain ETH transfers (empty calldata) require allowlisting bytes4(0).
     function execute(address target, uint256, bytes calldata data, bytes calldata) public payable {
         if (target == address(this)) return;
         bytes4 sel = data.length >= 4 ? bytes4(data[:4]) : bytes4(0);

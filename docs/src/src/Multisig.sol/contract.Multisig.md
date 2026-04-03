@@ -1,5 +1,5 @@
 # Multisig
-[Git Source](https://github.com/z0r0z/multisig/blob/5c2991a9a42bc92cd4c6a58d41a0aaae461905e0/src/Multisig.sol)
+[Git Source](https://github.com/z0r0z/multisig/blob/721bcd678965bd869b51578350a71b451e155085/src/Multisig.sol)
 
 
 ## State Variables
@@ -66,6 +66,13 @@ mapping(bytes32 txHash => uint256) public queued
 ```
 
 
+### approved
+
+```solidity
+mapping(address owner => mapping(bytes32 hash => bool)) public approved
+```
+
+
 ## Functions
 ### onlySelf
 
@@ -109,6 +116,16 @@ function getOwners() public view returns (address[] memory);
 function DOMAIN_SEPARATOR() public view returns (bytes32);
 ```
 
+### getTransactionHash
+
+
+```solidity
+function getTransactionHash(address target, uint256 value, bytes calldata data, uint32 _nonce)
+    public
+    view
+    returns (bytes32);
+```
+
 ### isValidSignature
 
 
@@ -123,6 +140,13 @@ function isValidSignature(bytes32 hash, bytes calldata sigs) public view returns
 function execute(address target, uint256 value, bytes calldata data, bytes calldata sigs) public payable;
 ```
 
+### approve
+
+
+```solidity
+function approve(bytes32 hash, bool ok) public payable;
+```
+
 ### cancelQueued
 
 
@@ -135,16 +159,6 @@ function cancelQueued(bytes32 hash) public payable;
 
 ```solidity
 function executeQueued(address target, uint256 value, bytes calldata data, uint32 _nonce) public payable;
-```
-
-### _txHash
-
-
-```solidity
-function _txHash(address target, uint256 value, bytes calldata data, uint32 _nonce)
-    internal
-    view
-    returns (bytes32);
 ```
 
 ### delegateCall
@@ -257,6 +271,12 @@ event ExecutionSuccess(bytes32 indexed txHash, uint256 nonce);
 
 ```solidity
 event Queued(bytes32 indexed txHash, uint256 nonce, uint256 eta);
+```
+
+### Approved
+
+```solidity
+event Approved(address indexed owner, bytes32 indexed hash, bool ok);
 ```
 
 ## Errors

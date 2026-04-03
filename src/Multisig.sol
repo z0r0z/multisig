@@ -9,6 +9,7 @@ contract Multisig {
     event ChangedExecutor(address indexed executor);
     event ExecutionSuccess(bytes32 indexed txHash, uint256 nonce);
     event Queued(bytes32 indexed txHash, uint256 nonce, uint256 eta);
+    event Approved(address indexed owner, bytes32 indexed hash, bool ok);
 
     error InvalidSig();
     error Unauthorized();
@@ -26,6 +27,7 @@ contract Multisig {
 
     mapping(address => address) _owners;
     mapping(bytes32 txHash => uint256) public queued;
+    mapping(address owner => mapping(bytes32 hash => bool)) public approved;
 
     modifier onlySelf() {
         require(msg.sender == address(this), Unauthorized());
@@ -81,6 +83,28 @@ contract Multisig {
         );
     }
 
+    function getTransactionHash(address target, uint256 value, bytes calldata data, uint32 _nonce)
+        public
+        view
+        returns (bytes32)
+    {
+        return keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                DOMAIN_SEPARATOR(),
+                keccak256(
+                    abi.encode(
+                        keccak256("Execute(address target,uint256 value,bytes data,uint32 nonce)"),
+                        target,
+                        value,
+                        keccak256(data),
+                        _nonce
+                    )
+                )
+            )
+        );
+    }
+
     function isValidSignature(bytes32 hash, bytes calldata sigs) public view returns (bytes4) {
         unchecked {
             bytes32 safe = keccak256(
@@ -95,7 +119,12 @@ contract Multisig {
             address signer;
             for (uint256 i; i != _threshold; ++i) {
                 o = i * 65;
-                signer = ecrecover(safe, uint8(sigs[o + 64]), bytes32(sigs[o:o + 32]), bytes32(sigs[o + 32:o + 64]));
+                if (uint8(sigs[o + 64]) == 0) {
+                    signer = address(uint160(uint256(bytes32(sigs[o:o + 32]))));
+                    require(approved[signer][safe], InvalidSig());
+                } else {
+                    signer = ecrecover(safe, uint8(sigs[o + 64]), bytes32(sigs[o:o + 32]), bytes32(sigs[o + 32:o + 64]));
+                }
                 require(signer != address(0) && _owners[signer] != address(0) && signer > prev, InvalidSig());
                 prev = signer;
             }
@@ -106,11 +135,9 @@ contract Multisig {
     function execute(address target, uint256 value, bytes calldata data, bytes calldata sigs) public payable {
         unchecked {
             (uint32 _delay, uint32 _nonce, uint16 _threshold, address _executor) = (delay, nonce++, threshold, executor);
-            bytes32 hash = _txHash(target, value, data, _nonce);
+            bytes32 hash = getTransactionHash(target, value, data, _nonce);
 
-            if (uint160(_executor) >> 144 == 0x1111) {
-                Multisig(payable(_executor)).execute(target, value, data, sigs);
-            }
+            if (uint160(_executor) >> 144 == 0x1111) Multisig(payable(_executor)).execute(target, value, data, sigs);
 
             if (msg.sender != _executor) {
                 uint256 o;
@@ -119,7 +146,13 @@ contract Multisig {
                 require(_threshold != 0 && sigs.length == _threshold * 65, InvalidSig());
                 for (uint256 i; i != _threshold; ++i) {
                     o = i * 65;
-                    signer = ecrecover(hash, uint8(sigs[o + 64]), bytes32(sigs[o:o + 32]), bytes32(sigs[o + 32:o + 64]));
+                    if (uint8(sigs[o + 64]) == 0) {
+                        signer = address(uint160(uint256(bytes32(sigs[o:o + 32]))));
+                        require(msg.sender == signer || approved[signer][hash], InvalidSig());
+                    } else {
+                        signer =
+                            ecrecover(hash, uint8(sigs[o + 64]), bytes32(sigs[o:o + 32]), bytes32(sigs[o + 32:o + 64]));
+                    }
                     require(signer != address(0) && _owners[signer] != address(0) && signer > prev, InvalidSig());
                     prev = signer;
                 }
@@ -141,41 +174,25 @@ contract Multisig {
         }
     }
 
+    function approve(bytes32 hash, bool ok) public payable {
+        require(isOwner(msg.sender), Unauthorized());
+        approved[msg.sender][hash] = ok;
+        emit Approved(msg.sender, hash, ok);
+    }
+
     function cancelQueued(bytes32 hash) public payable {
         require(msg.sender == executor, Unauthorized());
         delete queued[hash];
     }
 
     function executeQueued(address target, uint256 value, bytes calldata data, uint32 _nonce) public payable {
-        bytes32 hash = _txHash(target, value, data, _nonce);
+        bytes32 hash = getTransactionHash(target, value, data, _nonce);
         uint256 eta = queued[hash];
         require(eta != 0 && block.timestamp >= eta, NotReady(eta));
         delete queued[hash];
         (bool ok, bytes memory ret) = target.call{value: value}(data);
         if (!ok) assembly ("memory-safe") { revert(add(ret, 0x20), mload(ret)) }
         emit ExecutionSuccess(hash, _nonce);
-    }
-
-    function _txHash(address target, uint256 value, bytes calldata data, uint32 _nonce)
-        internal
-        view
-        returns (bytes32)
-    {
-        return keccak256(
-            abi.encodePacked(
-                "\x19\x01",
-                DOMAIN_SEPARATOR(),
-                keccak256(
-                    abi.encode(
-                        keccak256("Execute(address target,uint256 value,bytes data,uint32 nonce)"),
-                        target,
-                        value,
-                        keccak256(data),
-                        _nonce
-                    )
-                )
-            )
-        );
     }
 
     function delegateCall(address target, bytes calldata data) public payable onlySelf {
@@ -277,5 +294,25 @@ contract MultisigFactory {
         }
         Multisig(payable(wallet)).init(_owners, _delay, _threshold, _executor);
         emit Created(wallet);
+    }
+
+    /// @dev Create with post-init calls. Deploys with the factory as temporary
+    /// executor so calls bypass signatures, then sets the real executor last.
+    /// Use to configure singleton modules at the wallet's CREATE2 address.
+    function createWithCalls(
+        address[] calldata _owners,
+        uint32 _delay,
+        uint256 _threshold,
+        address _executor,
+        uint256 salt,
+        address[] calldata targets,
+        uint256[] calldata values,
+        bytes[] calldata datas
+    ) public payable returns (address wallet) {
+        wallet = create(_owners, _delay, _threshold, address(this), salt);
+        for (uint256 i; i != targets.length; ++i) {
+            Multisig(payable(wallet)).execute(targets[i], values[i], datas[i], "");
+        }
+        Multisig(payable(wallet)).execute(wallet, 0, abi.encodeCall(Multisig.setExecutor, (_executor)), "");
     }
 }

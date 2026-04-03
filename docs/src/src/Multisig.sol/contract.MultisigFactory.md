@@ -1,5 +1,5 @@
 # MultisigFactory
-[Git Source](https://github.com/z0r0z/multisig/blob/5c2991a9a42bc92cd4c6a58d41a0aaae461905e0/src/Multisig.sol)
+[Git Source](https://github.com/z0r0z/multisig/blob/721bcd678965bd869b51578350a71b451e155085/src/Multisig.sol)
 
 
 ## State Variables
@@ -30,6 +30,26 @@ function create(address[] calldata _owners, uint32 _delay, uint256 _threshold, a
     public
     payable
     returns (address wallet);
+```
+
+### createWithCalls
+
+Create with post-init calls. Deploys with the factory as temporary
+executor so calls bypass signatures, then sets the real executor last.
+Use to configure singleton modules at the wallet's CREATE2 address.
+
+
+```solidity
+function createWithCalls(
+    address[] calldata _owners,
+    uint32 _delay,
+    uint256 _threshold,
+    address _executor,
+    uint256 salt,
+    address[] calldata targets,
+    uint256[] calldata values,
+    bytes[] calldata datas
+) public payable returns (address wallet);
 ```
 
 ## Events

@@ -335,6 +335,148 @@ contract MultisigTest is Test {
     }
 
     // ═══════════════════════════════════════════
+    //         CREATE WITH CALLS TESTS
+    // ═══════════════════════════════════════════
+
+    function test_createWithCalls_basic() public {
+        address[] memory sorted = _sortedOwners();
+        address exec = address(0xEEEE);
+
+        address[] memory targets = new address[](1);
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory datas = new bytes[](1);
+        targets[0] = address(0); // will be filled after we know wallet addr — use self-call instead
+        datas[0] = ""; // placeholder
+
+        // Use a self-call: setDelay(100) via the wallet
+        // Target is the wallet itself — but we don't know the address yet.
+        // Instead, use an external target to keep it simple.
+        targets[0] = address(new Receiver());
+        datas[0] = "";
+
+        vm.deal(address(this), 1 ether);
+        address w = factory.createWithCalls{value: 1 ether}(sorted, 0, 2, exec, nextSalt++, targets, values, datas);
+        assertEq(Multisig(payable(w)).executor(), exec);
+        assertEq(Multisig(payable(w)).threshold(), 2);
+        assertEq(Multisig(payable(w)).nonce(), 2); // 1 call + 1 setExecutor
+    }
+
+    function test_createWithCalls_valueForwarding() public {
+        address[] memory sorted = _sortedOwners();
+        address recv = address(new Receiver());
+
+        address[] memory targets = new address[](1);
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory datas = new bytes[](1);
+        targets[0] = recv;
+        values[0] = 0.5 ether;
+
+        vm.deal(address(this), 1 ether);
+        address w =
+            factory.createWithCalls{value: 1 ether}(sorted, 0, 2, address(0), nextSalt++, targets, values, datas);
+        // 0.5 ether sent to receiver, 0.5 ether remains in wallet
+        assertEq(recv.balance, 0.5 ether);
+        assertEq(w.balance, 0.5 ether);
+    }
+
+    function test_createWithCalls_emptyCalls() public {
+        address[] memory sorted = _sortedOwners();
+        address exec = address(0xEEEE);
+        address[] memory targets = new address[](0);
+        uint256[] memory values = new uint256[](0);
+        bytes[] memory datas = new bytes[](0);
+
+        address w = factory.createWithCalls(sorted, 0, 2, exec, nextSalt++, targets, values, datas);
+        assertEq(Multisig(payable(w)).executor(), exec);
+        assertEq(Multisig(payable(w)).nonce(), 1); // only setExecutor
+    }
+
+    function test_createWithCalls_zeroExecutor() public {
+        address[] memory sorted = _sortedOwners();
+        address[] memory targets = new address[](0);
+        uint256[] memory values = new uint256[](0);
+        bytes[] memory datas = new bytes[](0);
+
+        address w = factory.createWithCalls(sorted, 0, 2, address(0), nextSalt++, targets, values, datas);
+        assertEq(Multisig(payable(w)).executor(), address(0));
+    }
+
+    function test_createWithCalls_revertSaltWrongCaller() public {
+        address[] memory sorted = _sortedOwners();
+        uint256 salt = uint256(uint160(address(0xBEEF))) << 96;
+        address[] memory targets = new address[](0);
+        uint256[] memory values = new uint256[](0);
+        bytes[] memory datas = new bytes[](0);
+
+        vm.expectRevert(MultisigFactory.SaltDoesNotStartWith.selector);
+        factory.createWithCalls(sorted, 0, 2, address(0), salt, targets, values, datas);
+    }
+
+    function test_createWithCalls_revertBadCall() public {
+        address[] memory sorted = _sortedOwners();
+        address[] memory targets = new address[](1);
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory datas = new bytes[](1);
+        targets[0] = address(new Reverter());
+
+        vm.expectRevert(bytes("nope"));
+        factory.createWithCalls(sorted, 0, 2, address(0), nextSalt++, targets, values, datas);
+    }
+
+    function test_createWithCalls_emitsCreated() public {
+        address[] memory sorted = _sortedOwners();
+        address[] memory targets = new address[](0);
+        uint256[] memory values = new uint256[](0);
+        bytes[] memory datas = new bytes[](0);
+
+        vm.expectEmit(false, false, false, false);
+        emit MultisigFactory.Created(address(0));
+        factory.createWithCalls(sorted, 0, 2, address(0), nextSalt++, targets, values, datas);
+    }
+
+    function test_createWithCalls_multipleCalls() public {
+        address[] memory sorted = _sortedOwners();
+        address r1 = address(new Receiver());
+        address r2 = address(new Receiver());
+
+        address[] memory targets = new address[](2);
+        uint256[] memory values = new uint256[](2);
+        bytes[] memory datas = new bytes[](2);
+        targets[0] = r1;
+        values[0] = 0.3 ether;
+        targets[1] = r2;
+        values[1] = 0.2 ether;
+
+        vm.deal(address(this), 1 ether);
+        address w =
+            factory.createWithCalls{value: 1 ether}(sorted, 0, 2, address(0), nextSalt++, targets, values, datas);
+        assertEq(r1.balance, 0.3 ether);
+        assertEq(r2.balance, 0.2 ether);
+        assertEq(w.balance, 0.5 ether);
+        assertEq(Multisig(payable(w)).nonce(), 3); // 2 calls + 1 setExecutor
+    }
+
+    function test_createWithCalls_walletFunctionalAfter() public {
+        address[] memory sorted = _sortedOwners();
+        address[] memory targets = new address[](0);
+        uint256[] memory values = new uint256[](0);
+        bytes[] memory datas = new bytes[](0);
+
+        vm.deal(address(this), 1 ether);
+        wallet = Multisig(
+            payable(factory.createWithCalls{value: 1 ether}(
+                    sorted, 0, 2, address(0), nextSalt++, targets, values, datas
+                ))
+        );
+
+        // Normal execute still works after createWithCalls (nonce advanced to 1)
+        address recv = address(new Receiver());
+        bytes memory sigs = _sign(wallet, recv, 1 ether, "", _pks2());
+        wallet.execute(recv, 1 ether, "", sigs);
+        assertEq(recv.balance, 1 ether);
+    }
+
+    // ═══════════════════════════════════════════
     //              INIT TESTS
     // ═══════════════════════════════════════════
 
@@ -863,6 +1005,16 @@ contract MultisigTest is Test {
 
     function test_safeMessageTypeHash() public pure {
         assertEq(keccak256("SafeMessage(bytes32 hash)"), SAFE_MSG_TYPEHASH);
+    }
+
+    function test_getTransactionHash() public {
+        wallet = _deploy(2);
+        address recv = address(new Receiver());
+        bytes memory data = abi.encodeCall(Multisig.setThreshold, (2));
+
+        // Public getter matches the digest helper used for signing
+        bytes32 hash = wallet.getTransactionHash(recv, 1 ether, data, uint32(wallet.nonce()));
+        assertEq(hash, _digest(wallet, recv, 1 ether, data));
     }
 
     function test_errorSelectors() public pure {
@@ -2649,5 +2801,251 @@ contract MultisigTest is Test {
         bytes memory sigs = _sign(wallet, address(wallet), 0, batchData, _pks2());
         wallet.execute(address(wallet), 0, batchData, sigs);
         assertEq(uint256(vm.load(address(wallet), bytes32(0))), 77);
+    }
+
+    // ═══════════════════════════════════════════
+    //           ON-CHAIN APPROVAL TESTS
+    // ═══════════════════════════════════════════
+
+    function test_approve_executeWithApproval() public {
+        wallet = _deployFunded(2, 1 ether);
+        address recv = address(new Receiver());
+
+        bytes32 hash = _digest(wallet, recv, 1 ether, "");
+
+        uint256[] memory pks = _pks2();
+        address high = vm.addr(pks[1]);
+
+        // High address owner approves onchain, low address owner signs ECDSA
+        vm.prank(high);
+        wallet.approve(hash, true);
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pks[0], hash);
+        bytes memory sigs = abi.encodePacked(r, s, v, bytes32(uint256(uint160(high))), bytes32(0), uint8(0));
+
+        wallet.execute(recv, 1 ether, "", sigs);
+        assertEq(recv.balance, 1 ether);
+    }
+
+    function test_approve_allApprovals() public {
+        wallet = _deployFunded(2, 1 ether);
+        address recv = address(new Receiver());
+
+        bytes32 hash = _digest(wallet, recv, 1 ether, "");
+
+        // Both signers approve onchain
+        uint256[] memory pks = _pks2();
+        address s0 = vm.addr(pks[0]);
+        address s1 = vm.addr(pks[1]);
+        vm.prank(s0);
+        wallet.approve(hash, true);
+        vm.prank(s1);
+        wallet.approve(hash, true);
+
+        // Both slots are approvals (v=0), ascending order
+        bytes memory sigs = abi.encodePacked(
+            bytes32(uint256(uint160(s0))), bytes32(0), uint8(0), bytes32(uint256(uint160(s1))), bytes32(0), uint8(0)
+        );
+
+        wallet.execute(recv, 1 ether, "", sigs);
+        assertEq(recv.balance, 1 ether);
+    }
+
+    function test_approve_revertNotApproved() public {
+        wallet = _deployFunded(2, 1 ether);
+        address recv = address(new Receiver());
+
+        // Owner1 does NOT approve — just encode as if they did
+        uint256[] memory pks = _pks2();
+        address s0 = vm.addr(pks[0]);
+        address s1 = vm.addr(pks[1]);
+
+        bytes32 hash = _digest(wallet, recv, 1 ether, "");
+
+        // Only s1 approves
+        vm.prank(s1);
+        wallet.approve(hash, true);
+
+        // s0 approval slot but no actual approval
+        bytes memory sigs = abi.encodePacked(
+            bytes32(uint256(uint160(s0))), bytes32(0), uint8(0), bytes32(uint256(uint160(s1))), bytes32(0), uint8(0)
+        );
+
+        vm.expectRevert(Multisig.InvalidSig.selector);
+        wallet.execute(recv, 1 ether, "", sigs);
+    }
+
+    function test_approve_revertNotOwner() public {
+        wallet = _deploy(2);
+        vm.prank(address(0xBAD));
+        vm.expectRevert(Multisig.Unauthorized.selector);
+        wallet.approve(bytes32(uint256(1)), true);
+    }
+
+    function test_approve_revoke() public {
+        wallet = _deployFunded(2, 1 ether);
+        address recv = address(new Receiver());
+
+        uint256[] memory pks = _pks2();
+        address low = vm.addr(pks[0]);
+        address high = vm.addr(pks[1]);
+
+        bytes32 hash = _digest(wallet, recv, 1 ether, "");
+
+        // Both approve
+        vm.prank(low);
+        wallet.approve(hash, true);
+        vm.prank(high);
+        wallet.approve(hash, true);
+
+        // High revokes
+        vm.prank(high);
+        wallet.approve(hash, false);
+
+        // Now only low is approved — not enough for threshold 2
+        bytes memory sigs = abi.encodePacked(
+            bytes32(uint256(uint160(low))), bytes32(0), uint8(0), bytes32(uint256(uint160(high))), bytes32(0), uint8(0)
+        );
+
+        vm.expectRevert(Multisig.InvalidSig.selector);
+        wallet.execute(recv, 1 ether, "", sigs);
+    }
+
+    function test_approve_emitsEvent() public {
+        wallet = _deploy(2);
+        bytes32 hash = bytes32(uint256(0x42));
+
+        vm.expectEmit(true, true, false, true, address(wallet));
+        emit Multisig.Approved(owner1, hash, true);
+        vm.prank(owner1);
+        wallet.approve(hash, true);
+    }
+
+    function test_approve_isValidSignature() public {
+        wallet = _deploy(2);
+        bytes32 msgHash = keccak256("hello");
+
+        // Compute the safe digest that isValidSignature verifies
+        bytes32 safe = _safeDigest(wallet, msgHash);
+
+        // Both owners approve the safe hash onchain
+        uint256[] memory pks = _pks2();
+        address s0 = vm.addr(pks[0]);
+        address s1 = vm.addr(pks[1]);
+        vm.prank(s0);
+        wallet.approve(safe, true);
+        vm.prank(s1);
+        wallet.approve(safe, true);
+
+        bytes memory sigs = abi.encodePacked(
+            bytes32(uint256(uint160(s0))), bytes32(0), uint8(0), bytes32(uint256(uint160(s1))), bytes32(0), uint8(0)
+        );
+
+        assertEq(wallet.isValidSignature(msgHash, sigs), Multisig.isValidSignature.selector);
+    }
+
+    function test_approve_mixedWithEcdsaOrdering() public {
+        // 3-of-3 wallet: one approves, two sign ECDSA
+        wallet = _deployFunded(3, 1 ether);
+        address recv = address(new Receiver());
+
+        bytes32 hash = _digest(wallet, recv, 1 ether, "");
+
+        // Sort all three PKs by address
+        uint256[] memory pks = _pks3();
+        address mid = vm.addr(pks[1]);
+
+        // Middle signer approves onchain
+        vm.prank(mid);
+        wallet.approve(hash, true);
+
+        // Build: ECDSA(low) | approval(mid) | ECDSA(high)
+        (uint8 v0, bytes32 r0, bytes32 s0) = vm.sign(pks[0], hash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(pks[2], hash);
+        bytes memory sigs =
+            abi.encodePacked(r0, s0, v0, bytes32(uint256(uint160(mid))), bytes32(0), uint8(0), r2, s2, v2);
+
+        wallet.execute(recv, 1 ether, "", sigs);
+        assertEq(recv.balance, 1 ether);
+    }
+
+    function test_approve_contractOwnerCanApprove() public {
+        // Deploy a contract as owner — it can approve onchain
+        address contractOwner = address(new Receiver());
+
+        address[] memory owners = new address[](2);
+        owners[0] = owner1 < contractOwner ? owner1 : contractOwner;
+        owners[1] = owner1 < contractOwner ? contractOwner : owner1;
+
+        vm.deal(address(this), 1 ether);
+        Multisig w = Multisig(payable(factory.create{value: 1 ether}(owners, 0, 2, address(0), nextSalt++)));
+
+        address recv = address(new Receiver());
+        bytes32 hash = _digest(w, recv, 1 ether, "");
+
+        // Contract owner approves onchain
+        vm.prank(contractOwner);
+        w.approve(hash, true);
+
+        // Build sigs in ascending order
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk1, hash);
+
+        bytes memory sigs;
+        if (owner1 < contractOwner) {
+            sigs = abi.encodePacked(r, s, v, bytes32(uint256(uint160(contractOwner))), bytes32(0), uint8(0));
+        } else {
+            sigs = abi.encodePacked(bytes32(uint256(uint160(contractOwner))), bytes32(0), uint8(0), r, s, v);
+        }
+
+        w.execute(recv, 1 ether, "", sigs);
+        assertEq(recv.balance, 1 ether);
+    }
+
+    function test_approve_senderBypass() public {
+        // 2-of-2: owner A signs ECDSA, owner B submits tx with v=0 — no prior approve needed
+        address[] memory owners = new address[](2);
+        uint256[] memory pks = _pks2();
+        address low = vm.addr(pks[0]);
+        address high = vm.addr(pks[1]);
+        owners[0] = low;
+        owners[1] = high;
+
+        vm.deal(address(this), 1 ether);
+        Multisig w = Multisig(payable(factory.create{value: 1 ether}(owners, 0, 2, address(0), nextSalt++)));
+
+        address recv = address(new Receiver());
+        bytes32 hash = _digest(w, recv, 1 ether, "");
+
+        // low signs ECDSA, high submits as msg.sender with v=0 (no approve call)
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pks[0], hash);
+        bytes memory sigs = abi.encodePacked(r, s, v, bytes32(uint256(uint160(high))), bytes32(0), uint8(0));
+
+        // high submits — msg.sender == signer bypasses approval check
+        vm.prank(high);
+        w.execute(recv, 1 ether, "", sigs);
+        assertEq(recv.balance, 1 ether);
+    }
+
+    function test_approve_senderBypassRevertWrongSender() public {
+        // v=0 without prior approve AND msg.sender != signer → reverts
+        address[] memory owners = new address[](2);
+        uint256[] memory pks = _pks2();
+        address low = vm.addr(pks[0]);
+        address high = vm.addr(pks[1]);
+        owners[0] = low;
+        owners[1] = high;
+
+        Multisig w = Multisig(payable(factory.create(owners, 0, 2, address(0), nextSalt++)));
+
+        address recv = address(new Receiver());
+        bytes32 hash = _digest(w, recv, 0, "");
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pks[0], hash);
+        bytes memory sigs = abi.encodePacked(r, s, v, bytes32(uint256(uint160(high))), bytes32(0), uint8(0));
+
+        // Someone else submits — not high, and high hasn't approved
+        vm.prank(address(0xBAD));
+        vm.expectRevert(Multisig.InvalidSig.selector);
+        w.execute(recv, 0, "", sigs);
     }
 }

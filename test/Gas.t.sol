@@ -12,20 +12,26 @@ contract GasTest is Test {
     uint256 pk1 = 0xA1;
     uint256 pk2 = 0xB2;
     uint256 pk3 = 0xC3;
+    uint256 pk4 = 0xD4;
+    uint256 pk5 = 0xE5;
 
     address owner1;
     address owner2;
     address owner3;
+    address owner4;
+    address owner5;
 
     address receiver;
     address executorAddr = address(0xE0);
 
-    bytes32 constant EXECUTE_TYPEHASH = keccak256("Execute(address target,uint256 value,bytes data,uint48 nonce)");
+    bytes32 constant EXECUTE_TYPEHASH = keccak256("Execute(address target,uint256 value,bytes data,uint32 nonce)");
 
     function setUp() public {
         owner1 = vm.addr(pk1);
         owner2 = vm.addr(pk2);
         owner3 = vm.addr(pk3);
+        owner4 = vm.addr(pk4);
+        owner5 = vm.addr(pk5);
 
         factory = new MultisigFactory();
         receiver = makeAddr("receiver");
@@ -34,31 +40,65 @@ contract GasTest is Test {
 
     // ───────── Helpers ─────────
 
-    function _sortedOwners() internal view returns (address[] memory) {
-        address[] memory arr = new address[](3);
-        arr[0] = owner1;
-        arr[1] = owner2;
-        arr[2] = owner3;
-        for (uint256 i; i < 3; ++i) {
-            for (uint256 j = i + 1; j < 3; ++j) {
+    function _allPks() internal view returns (uint256[] memory) {
+        uint256[] memory pks = new uint256[](5);
+        pks[0] = pk1;
+        pks[1] = pk2;
+        pks[2] = pk3;
+        pks[3] = pk4;
+        pks[4] = pk5;
+        return pks;
+    }
+
+    function _allAddrs() internal view returns (address[] memory) {
+        address[] memory addrs = new address[](5);
+        addrs[0] = owner1;
+        addrs[1] = owner2;
+        addrs[2] = owner3;
+        addrs[3] = owner4;
+        addrs[4] = owner5;
+        return addrs;
+    }
+
+    function _sortedOwnersN(uint256 n) internal view returns (address[] memory) {
+        address[] memory all = _allAddrs();
+        address[] memory arr = new address[](n);
+        for (uint256 i; i < n; ++i) {
+            arr[i] = all[i];
+        }
+        for (uint256 i; i < n; ++i) {
+            for (uint256 j = i + 1; j < n; ++j) {
                 if (arr[i] > arr[j]) (arr[i], arr[j]) = (arr[j], arr[i]);
             }
         }
         return arr;
     }
 
-    function _sortedPks() internal view returns (uint256[] memory) {
-        address[] memory addrs = _sortedOwners();
-        uint256[] memory pks = new uint256[](3);
-        for (uint256 i; i < 3; ++i) {
-            if (addrs[i] == owner1) pks[i] = pk1;
-            else if (addrs[i] == owner2) pks[i] = pk2;
-            else pks[i] = pk3;
+    function _sortedOwners() internal view returns (address[] memory) {
+        return _sortedOwnersN(3);
+    }
+
+    function _sortedPksN(uint256 n) internal view returns (uint256[] memory) {
+        address[] memory addrs = _sortedOwnersN(n);
+        address[] memory all = _allAddrs();
+        uint256[] memory allPks = _allPks();
+        uint256[] memory pks = new uint256[](n);
+        for (uint256 i; i < n; ++i) {
+            for (uint256 j; j < 5; ++j) {
+                if (addrs[i] == all[j]) {
+                    pks[i] = allPks[j];
+                    break;
+                }
+            }
         }
         return pks;
     }
 
-    function _sign(Multisig w, address to, uint256 value, bytes memory data, uint256 n)
+    function _sortedPks() internal view returns (uint256[] memory) {
+        return _sortedPksN(3);
+    }
+
+    function _signN(Multisig w, address to, uint256 value, bytes memory data, uint256 n, uint256 ownerCount)
         internal
         view
         returns (bytes memory sigs)
@@ -70,7 +110,7 @@ contract GasTest is Test {
                 keccak256(abi.encode(EXECUTE_TYPEHASH, to, value, keccak256(data), w.nonce()))
             )
         );
-        uint256[] memory pks = _sortedPks();
+        uint256[] memory pks = _sortedPksN(ownerCount);
         sigs = new bytes(n * 65);
         for (uint256 i; i < n; ++i) {
             (uint8 v, bytes32 r, bytes32 s) = vm.sign(pks[i], hash);
@@ -84,19 +124,46 @@ contract GasTest is Test {
         }
     }
 
+    function _sign(Multisig w, address to, uint256 value, bytes memory data, uint256 n)
+        internal
+        view
+        returns (bytes memory sigs)
+    {
+        return _signN(w, to, value, data, n, 3);
+    }
+
     uint256 salt;
 
-    function _deploy(uint256 threshold, uint32 delay, address exec) internal returns (Multisig w) {
-        address[] memory owners = _sortedOwners();
-        w = Multisig(payable(factory.create{value: 1 ether}(owners, delay, threshold, exec, salt++)));
-        // warm all storage slots to measure steady-state gas (not cold-access)
+    function _deployN(uint256 ownerCount, uint256 threshold, uint32 delay, address exec) internal returns (Multisig w) {
+        address[] memory o = _sortedOwnersN(ownerCount);
+        w = Multisig(payable(factory.create{value: 1 ether}(o, delay, threshold, exec, salt++)));
         w.nonce();
         w.threshold();
         w.delay();
         w.executor();
     }
 
+    function _deploy(uint256 threshold, uint32 delay, address exec) internal returns (Multisig w) {
+        return _deployN(3, threshold, delay, exec);
+    }
+
     // ───────── Deploy ─────────
+
+    function test_gas_deploy_1of1() public {
+        address[] memory o = _sortedOwnersN(1);
+        uint256 g = gasleft();
+        factory.create(o, 0, 1, address(0), salt++);
+        g -= gasleft();
+        emit log_named_uint("deploy 1-of-1", g);
+    }
+
+    function test_gas_deploy_2of2() public {
+        address[] memory o = _sortedOwnersN(2);
+        uint256 g = gasleft();
+        factory.create(o, 0, 2, address(0), salt++);
+        g -= gasleft();
+        emit log_named_uint("deploy 2-of-2", g);
+    }
 
     function test_gas_deploy() public {
         address[] memory owners = _sortedOwners();
@@ -107,6 +174,24 @@ contract GasTest is Test {
     }
 
     // ───────── ETH transfers by signer count ─────────
+
+    function test_gas_execute_1of1() public {
+        Multisig w = _deployN(1, 1, 0, address(0));
+        bytes memory sigs = _signN(w, receiver, 0.1 ether, "", 1, 1);
+        uint256 g = gasleft();
+        w.execute(receiver, 0.1 ether, "", sigs);
+        g -= gasleft();
+        emit log_named_uint("execute ETH 1-of-1", g);
+    }
+
+    function test_gas_execute_2of2() public {
+        Multisig w = _deployN(2, 2, 0, address(0));
+        bytes memory sigs = _signN(w, receiver, 0.1 ether, "", 2, 2);
+        uint256 g = gasleft();
+        w.execute(receiver, 0.1 ether, "", sigs);
+        g -= gasleft();
+        emit log_named_uint("execute ETH 2-of-2", g);
+    }
 
     function test_gas_execute_1of3() public {
         Multisig w = _deploy(1, 0, address(0));
@@ -133,6 +218,15 @@ contract GasTest is Test {
         w.execute(receiver, 0.1 ether, "", sigs);
         g -= gasleft();
         emit log_named_uint("execute ETH 3-of-3", g);
+    }
+
+    function test_gas_execute_3of5() public {
+        Multisig w = _deployN(5, 3, 0, address(0));
+        bytes memory sigs = _signN(w, receiver, 0.1 ether, "", 3, 5);
+        uint256 g = gasleft();
+        w.execute(receiver, 0.1 ether, "", sigs);
+        g -= gasleft();
+        emit log_named_uint("execute ETH 3-of-5", g);
     }
 
     // ───────── Executor ─────────

@@ -16,13 +16,15 @@ contract Multisig {
     error NotReady(uint256 eta);
 
     uint32 public delay;
-    uint48 public nonce;
+    uint32 public nonce;
     uint16 public threshold;
+    uint16 public ownerCount;
     address public executor;
-    address immutable factory = msg.sender;
 
-    address[] owners;
-    mapping(address account => bool) public isOwner;
+    address immutable factory = msg.sender;
+    address constant SENTINEL = address(1);
+
+    mapping(address => address) _owners;
     mapping(bytes32 txHash => uint256) public queued;
 
     modifier onlySelf() {
@@ -32,25 +34,39 @@ contract Multisig {
 
     constructor() payable {}
 
-    function init(address[] calldata _owners, uint32 _delay, uint256 _threshold, address _executor) public payable {
+    function init(address[] calldata owners_, uint32 _delay, uint256 _threshold, address _executor) public payable {
         require(msg.sender == factory || msg.sender == address(this), Unauthorized());
-        require(threshold == 0 && _threshold != 0 && _threshold <= _owners.length, InvalidConfig());
+        uint256 len = owners_.length;
+        require(threshold == 0 && _threshold != 0 && _threshold <= len, InvalidConfig());
         if (_delay != 0) delay = _delay;
         if (_executor != address(0)) executor = _executor;
         threshold = uint16(_threshold);
-        address prev;
+        ownerCount = uint16(len);
+        address prev = SENTINEL;
         address owner;
-        for (uint256 i; i != _owners.length; ++i) {
-            owner = _owners[i];
-            require(owner > prev, InvalidConfig());
-            isOwner[owner] = true;
-            owners.push(owner);
-            prev = owner;
+        unchecked {
+            for (uint256 i; i != len; ++i) {
+                owner = owners_[i];
+                require(owner > prev, InvalidConfig());
+                _owners[prev] = owner;
+                prev = owner;
+            }
         }
+        _owners[prev] = SENTINEL;
+    }
+
+    function isOwner(address account) public view returns (bool) {
+        return account != SENTINEL && _owners[account] != address(0);
     }
 
     function getOwners() public view returns (address[] memory) {
-        return owners;
+        address[] memory arr = new address[](ownerCount);
+        address current = _owners[SENTINEL];
+        for (uint256 i; current != SENTINEL; ++i) {
+            arr[i] = current;
+            current = _owners[current];
+        }
+        return arr;
     }
 
     function DOMAIN_SEPARATOR() public view returns (bytes32) {
@@ -80,7 +96,7 @@ contract Multisig {
             for (uint256 i; i != _threshold; ++i) {
                 o = i * 65;
                 signer = ecrecover(safe, uint8(sigs[o + 64]), bytes32(sigs[o:o + 32]), bytes32(sigs[o + 32:o + 64]));
-                require(signer != address(0) && isOwner[signer] && signer > prev, InvalidSig());
+                require(signer != address(0) && _owners[signer] != address(0) && signer > prev, InvalidSig());
                 prev = signer;
             }
             return this.isValidSignature.selector;
@@ -89,8 +105,12 @@ contract Multisig {
 
     function execute(address target, uint256 value, bytes calldata data, bytes calldata sigs) public payable {
         unchecked {
-            (uint32 _delay, uint48 _nonce, uint16 _threshold, address _executor) = (delay, nonce++, threshold, executor);
+            (uint32 _delay, uint32 _nonce, uint16 _threshold, address _executor) = (delay, nonce++, threshold, executor);
             bytes32 hash = _txHash(target, value, data, _nonce);
+
+            if (uint160(_executor) >> 144 == 0x1111) {
+                Multisig(payable(_executor)).execute(target, value, data, sigs);
+            }
 
             if (msg.sender != _executor) {
                 uint256 o;
@@ -100,7 +120,7 @@ contract Multisig {
                 for (uint256 i; i != _threshold; ++i) {
                     o = i * 65;
                     signer = ecrecover(hash, uint8(sigs[o + 64]), bytes32(sigs[o:o + 32]), bytes32(sigs[o + 32:o + 64]));
-                    require(signer != address(0) && isOwner[signer] && signer > prev, InvalidSig());
+                    require(signer != address(0) && _owners[signer] != address(0) && signer > prev, InvalidSig());
                     prev = signer;
                 }
             }
@@ -114,10 +134,19 @@ contract Multisig {
                 queued[hash] = eta;
                 emit Queued(hash, _nonce, eta);
             }
+
+            if ((uint160(_executor) & 0xFFFF) == 0x1111) {
+                Multisig(payable(_executor)).execute(target, value, data, sigs);
+            }
         }
     }
 
-    function executeQueued(address target, uint256 value, bytes calldata data, uint48 _nonce) public payable {
+    function cancelQueued(bytes32 hash) public payable {
+        require(msg.sender == executor, Unauthorized());
+        delete queued[hash];
+    }
+
+    function executeQueued(address target, uint256 value, bytes calldata data, uint32 _nonce) public payable {
         bytes32 hash = _txHash(target, value, data, _nonce);
         uint256 eta = queued[hash];
         require(eta != 0 && block.timestamp >= eta, NotReady(eta));
@@ -127,7 +156,7 @@ contract Multisig {
         emit ExecutionSuccess(hash, _nonce);
     }
 
-    function _txHash(address target, uint256 value, bytes calldata data, uint48 _nonce)
+    function _txHash(address target, uint256 value, bytes calldata data, uint32 _nonce)
         internal
         view
         returns (bytes32)
@@ -138,7 +167,7 @@ contract Multisig {
                 DOMAIN_SEPARATOR(),
                 keccak256(
                     abi.encode(
-                        keccak256("Execute(address target,uint256 value,bytes data,uint48 nonce)"),
+                        keccak256("Execute(address target,uint256 value,bytes data,uint32 nonce)"),
                         target,
                         value,
                         keccak256(data),
@@ -166,24 +195,22 @@ contract Multisig {
     }
 
     function addOwner(address _owner) public payable onlySelf {
-        require(_owner != address(0) && !isOwner[_owner], InvalidConfig());
-        isOwner[_owner] = true;
-        owners.push(_owner);
+        require(_owner > SENTINEL && _owners[_owner] == address(0), InvalidConfig());
+        _owners[_owner] = _owners[SENTINEL];
+        _owners[SENTINEL] = _owner;
+        unchecked {
+            ++ownerCount;
+        }
         emit AddedOwner(_owner);
     }
 
-    function removeOwner(address _owner) public payable onlySelf {
-        uint256 len = owners.length;
-        require(len > threshold && isOwner[_owner], InvalidConfig());
-        isOwner[_owner] = false;
-        for (uint256 i; i != len; ++i) {
-            unchecked {
-                if (owners[i] == _owner) {
-                    owners[i] = owners[len - 1];
-                    owners.pop();
-                    break;
-                }
-            }
+    function removeOwner(address prevOwner, address _owner) public payable onlySelf {
+        require(ownerCount > threshold && _owners[_owner] != address(0) && _owner != SENTINEL, InvalidConfig());
+        require(_owners[prevOwner] == _owner, InvalidConfig());
+        _owners[prevOwner] = _owners[_owner];
+        delete _owners[_owner];
+        unchecked {
+            --ownerCount;
         }
         emit RemovedOwner(_owner);
     }
@@ -197,7 +224,7 @@ contract Multisig {
     }
 
     function setThreshold(uint256 _threshold) public payable onlySelf {
-        require(_threshold != 0 && _threshold <= owners.length, InvalidConfig());
+        require(_threshold != 0 && _threshold <= ownerCount, InvalidConfig());
         threshold = uint16(_threshold);
         emit ChangedThreshold(_threshold);
     }

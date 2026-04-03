@@ -1,5 +1,5 @@
 # Multisig
-[Git Source](https://github.com/z0r0z/multisig/blob/8708b4ffa2c639f2cc4a07f746205a2c3317d9b8/src/Multisig.sol)
+[Git Source](https://github.com/z0r0z/multisig/blob/ba5a100b267602209ab0c55c94670979e30904c1/src/Multisig.sol)
 
 
 ## State Variables
@@ -13,7 +13,7 @@ uint32 public delay
 ### nonce
 
 ```solidity
-uint48 public nonce
+uint32 public nonce
 ```
 
 
@@ -21,6 +21,13 @@ uint48 public nonce
 
 ```solidity
 uint16 public threshold
+```
+
+
+### ownerCount
+
+```solidity
+uint16 public ownerCount
 ```
 
 
@@ -38,17 +45,17 @@ address immutable factory = msg.sender
 ```
 
 
-### owners
+### SENTINEL
 
 ```solidity
-address[] owners
+address constant SENTINEL = address(1)
 ```
 
 
-### isOwner
+### _owners
 
 ```solidity
-mapping(address account => bool) public isOwner
+mapping(address => address) _owners
 ```
 
 
@@ -78,7 +85,14 @@ constructor() payable;
 
 
 ```solidity
-function init(address[] calldata _owners, uint32 _delay, uint256 _threshold, address _executor) public payable;
+function init(address[] calldata owners_, uint32 _delay, uint256 _threshold, address _executor) public payable;
+```
+
+### isOwner
+
+
+```solidity
+function isOwner(address account) public view returns (bool);
 ```
 
 ### getOwners
@@ -109,18 +123,25 @@ function isValidSignature(bytes32 hash, bytes calldata sigs) public view returns
 function execute(address target, uint256 value, bytes calldata data, bytes calldata sigs) public payable;
 ```
 
+### cancelQueued
+
+
+```solidity
+function cancelQueued(bytes32 hash) public payable;
+```
+
 ### executeQueued
 
 
 ```solidity
-function executeQueued(address target, uint256 value, bytes calldata data, uint48 _nonce) public payable;
+function executeQueued(address target, uint256 value, bytes calldata data, uint32 _nonce) public payable;
 ```
 
 ### _txHash
 
 
 ```solidity
-function _txHash(address target, uint256 value, bytes calldata data, uint48 _nonce)
+function _txHash(address target, uint256 value, bytes calldata data, uint32 _nonce)
     internal
     view
     returns (bytes32);
@@ -154,7 +175,7 @@ function addOwner(address _owner) public payable onlySelf;
 
 
 ```solidity
-function removeOwner(address _owner) public payable onlySelf;
+function removeOwner(address prevOwner, address _owner) public payable onlySelf;
 ```
 
 ### setDelay

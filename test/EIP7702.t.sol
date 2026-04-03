@@ -34,7 +34,7 @@ contract EIP7702Test is Test {
     address owner2;
     address owner3;
 
-    bytes32 constant EXECUTE_TYPEHASH = keccak256("Execute(address target,uint256 value,bytes data,uint48 nonce)");
+    bytes32 constant EXECUTE_TYPEHASH = keccak256("Execute(address target,uint256 value,bytes data,uint32 nonce)");
     bytes32 constant SAFE_MSG_TYPEHASH = keccak256("SafeMessage(bytes32 hash)");
 
     function setUp() public {
@@ -241,7 +241,7 @@ contract EIP7702Test is Test {
         address[] memory sorted = _sortedOwners();
 
         vm.prank(eoa);
-        Multisig(payable(eoa)).removeOwner(sorted[0]);
+        Multisig(payable(eoa)).removeOwner(address(1), sorted[0]);
         assertFalse(Multisig(payable(eoa)).isOwner(sorted[0]));
     }
 
@@ -354,7 +354,7 @@ contract EIP7702Test is Test {
         vm.deal(eoa, 1 ether);
         address receiver = address(new Receiver());
 
-        uint48 nonceAtQueue = wallet.nonce();
+        uint32 nonceAtQueue = wallet.nonce();
         bytes memory sigs = _sign(eoa, receiver, 1 ether, "", _pks2());
 
         vm.expectEmit(false, false, false, true);
@@ -372,7 +372,7 @@ contract EIP7702Test is Test {
         vm.deal(eoa, 1 ether);
         address receiver = address(new Receiver());
 
-        uint48 nonceAtQueue = wallet.nonce();
+        uint32 nonceAtQueue = wallet.nonce();
         bytes memory sigs = _sign(eoa, receiver, 1 ether, "", _pks2());
         wallet.execute(receiver, 1 ether, "", sigs);
 
@@ -389,7 +389,7 @@ contract EIP7702Test is Test {
         vm.deal(eoa, 1 ether);
         address receiver = address(new Receiver());
 
-        uint48 nonceAtQueue = wallet.nonce();
+        uint32 nonceAtQueue = wallet.nonce();
         bytes memory sigs = _sign(eoa, receiver, 1 ether, "", _pks2());
         wallet.execute(receiver, 1 ether, "", sigs);
 
@@ -413,7 +413,7 @@ contract EIP7702Test is Test {
         vm.deal(eoa, 2 ether);
         address receiver = address(new Receiver());
 
-        uint48 n = wallet.nonce();
+        uint32 n = wallet.nonce();
         bytes memory sigs = _sign(eoa, receiver, 1 ether, "", _pks2());
         wallet.execute(receiver, 1 ether, "", sigs);
 
@@ -466,7 +466,7 @@ contract EIP7702Test is Test {
         vm.deal(eoa, 1 ether);
         address receiver = address(new Receiver());
 
-        uint48 n = wallet.nonce();
+        uint32 n = wallet.nonce();
         bytes memory sigs = _sign(eoa, receiver, 1 ether, "", _pks2());
         wallet.execute(receiver, 1 ether, "", sigs);
 
@@ -535,7 +535,7 @@ contract EIP7702Test is Test {
         address receiver = address(new Receiver());
 
         Multisig wallet = Multisig(payable(eoa));
-        uint48 n = wallet.nonce();
+        uint32 n = wallet.nonce();
 
         // owners queue a tx
         bytes memory sigs = _sign(eoa, receiver, 1 ether, "", _pks2());

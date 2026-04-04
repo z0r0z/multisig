@@ -38,7 +38,10 @@ contract SocialRecovery {
         require(isGuardian[multisig][msg.sender], Unauthorized());
         require(pending[multisig] == bytes32(0) || block.timestamp >= eta[multisig], NotReady());
         bytes32 hash = keccak256(abi.encode(target, value, data));
-        uint256 _eta = block.timestamp + delay[multisig];
+        uint256 _eta;
+        unchecked {
+            _eta = block.timestamp + delay[multisig];
+        }
         pending[multisig] = hash;
         eta[multisig] = _eta;
         emit Proposed(multisig, hash, _eta);

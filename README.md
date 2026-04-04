@@ -25,7 +25,7 @@ Deploy a standalone multisig via `MultisigFactory`:
 
 The salt must start with `address(0)` (permissionless deploy) or `msg.sender` (sender-bound, for pre-funding). This follows the Solady `LibClone.checkStartsWith` pattern.
 
-When `delay` is set, transactions are queued with an ETA and executed later via `executeQueued`. The executor can cancel queued transactions via `cancelQueued`. Use `batch` and `delegateCall` through `execute(address(this), ...)` to atomically bundle calls or run arbitrary code in the wallet's context.
+When `delay` is set, transactions are queued with an ETA and executed later via `executeQueued`. Cancel queued transactions via `cancelQueued` (self-call only — route through `execute`). Self-calls to `executeQueued` skip the ETA check, enabling executor modules to accelerate already-queued transactions. Use `batch` and `delegateCall` through `execute(address(this), ...)` to atomically bundle calls or run arbitrary code in the wallet's context.
 
 The wallet supports ERC-721 and ERC-1155 token callbacks via the fallback function (`onERC721Received`, `onERC1155Received`, `onERC1155BatchReceived`).
 
@@ -79,6 +79,8 @@ An optional `executor` address bypasses both signature verification and timelock
 
 The executor has full control by design. The timelock gives stakeholders an exit window against the *owners* — the executor operates outside it. If the executor is compromised, owners revoke it through the normal timelocked path.
 
+`cancelQueued(hash)` is `onlySelf` — cancel must be routed as a self-call through `execute`. This lets executor modules like `TimelockExecutor` gate cancellation behind signature verification while executing immediately. `executeQueued` skips the ETA check when called by the wallet itself (`msg.sender == address(this)`), enabling executor modules to accelerate already-queued transactions via self-call.
+
 ### Guard Mode
 
 The executor doubles as a transaction guard when deployed to a vanity address. Guard behavior is encoded in the address itself — no extra storage, no new functions:
@@ -90,7 +92,9 @@ The executor doubles as a transaction guard when deployed to a vanity address. G
 | `0x1111` | `0x1111` | Both pre and post guard |
 | other | other | Plain executor (no guard calls) |
 
-The guard receives the same `execute(target, value, data, sigs)` payload as the multisig — it can inspect the transaction and revert to block it, or no-op to allow. Mining a 4-byte vanity address (2 leading + 2 trailing) is comparable to mining a 4-byte prefix, feasible in minutes on a GPU.
+The guard receives an `execute(target, value, data, sigs)` call — it can inspect the transaction and revert to block it, or no-op to allow. Both `execute` and `executeQueued` trigger guard calls (`executeQueued` passes empty sigs). Mining a 4-byte vanity address (2 leading + 2 trailing) is comparable to mining a 4-byte prefix, feasible in minutes on a GPU.
+
+> **Warning:** If the guard contract cannot handle the forwarded `execute` call (i.e. always reverts), the wallet is bricked — `execute`, `executeQueued`, and `setExecutor` all trigger the guard, so there is no recovery path. Ensure the guard contract correctly implements the `execute` interface before assigning it.
 
 ## Modules
 
@@ -102,13 +106,28 @@ Singleton module contracts in `src/mods/` demonstrate common patterns — each i
 | **SpendingAllowance** | Executor | Safe AllowanceModule |
 | **SocialRecovery** | Executor | Safe SocialRecoveryModule |
 | **DeadmanSwitch** | Post-guard + executor (vanity `0x1111` suffix) | Zodiac Dead Man's Switch |
-| **CancelTx** | Executor | — (cancel at threshold, fast-forward unanimous, opt-in) |
+| **TimelockExecutor** | Executor | — (cancel at threshold, forward at unanimous, accelerate queued) |
+
+### TimelockExecutor
+
+The `TimelockExecutor` module manages the timelock using the same EIP-712 `Execute` typehash as the multisig itself. The UI collects signatures as usual and routes based on count:
+
+| Signatures | Action | Route |
+|---|---|---|
+| Threshold | Normal execute | `Multisig.execute()` — queues with timelock |
+| Threshold + cancel selector | Cancel queued tx | `TimelockExecutor.forward()` — immediate cancel |
+| All owners | Immediate execute | `TimelockExecutor.forward()` — bypasses timelock |
+| All owners + executeQueued | Accelerate queued tx | `TimelockExecutor.forward()` — consumes queued entry |
+
+Cancel is always available (defensive action). Forward and accelerate require `enableForward(true)` — the timelock is a security boundary that should only be bypassable when the multisig explicitly opts in.
+
+The module supports both ECDSA signatures and onchain approvals (`v=0`), mirroring the multisig's own verification. Signatures are interchangeable between direct `execute()` and module `forward()` — the nonce is consumed atomically, preventing replay across paths.
 
 ## Comparison with Safe
 
 | Feature | This Multisig | Safe |
 |---|---|---|
-| **Core LOC** | 317 (single file) | ~3,500 (multiple files) |
+| **Core LOC** | 321 (single file) | ~3,500 (multiple files) |
 | **Runtime bytecode** | ~10 KB | ~23 KB |
 | **Proxy clone size** | 45 bytes (PUSH0) | 45 bytes (EIP-1167) |
 | **Storage: core state** | 1 slot (packed) | Multiple slots |
@@ -143,7 +162,7 @@ This multisig: `forge test --mc GasTest -vv` (`gasleft()` snapshots, warm storag
 | 3-of-5 | 52,104 | 72,281 | -28% |
 | **Executor (no sigs)** | 40,932 | — | — |
 | **Queue (delay)** | 35,810 | — | — |
-| **Execute queued** | 38,642 | — | — |
+| **Execute queued** | 38,855 | — | — |
 | **Batch 3 ETH transfers** | 65,689 | — | — |
 
 - Execution is 25-28% cheaper due to single-slot state packing. Each additional signer adds ~4,300 gas (`ecrecover` + `isOwner` SLOAD).

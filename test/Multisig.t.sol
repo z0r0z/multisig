@@ -1431,7 +1431,7 @@ contract MultisigTest is Test {
         );
     }
 
-    function test_cancelQueued_executorCancels() public {
+    function test_cancelQueued_viaSelfCall() public {
         address exec = address(0xEEEE);
         wallet = _deployFull(2, 1 days, exec, 1 ether);
         address receiver = address(new Receiver());
@@ -1443,8 +1443,11 @@ contract MultisigTest is Test {
         bytes32 hash = _txHash(wallet, receiver, 1 ether, "", n);
         assertGt(wallet.queued(hash), 0);
 
+        // Executor routes cancel through execute → self-call
+        vm.expectEmit(true, false, false, true);
+        emit Multisig.Queued(hash, 0, 0);
         vm.prank(exec);
-        wallet.cancelQueued(hash);
+        wallet.execute(address(wallet), 0, abi.encodeCall(Multisig.cancelQueued, (hash)), "");
         assertEq(wallet.queued(hash), 0);
 
         // executeQueued now reverts
@@ -1453,7 +1456,45 @@ contract MultisigTest is Test {
         wallet.executeQueued(receiver, 1 ether, "", n);
     }
 
-    function test_cancelQueued_revertNotExecutor() public {
+    function test_executeQueued_selfCallBypassesEta() public {
+        address exec = address(0xEEEE);
+        wallet = _deployFull(2, 1 days, exec, 1 ether);
+        address receiver = address(new Receiver());
+
+        uint32 n = wallet.nonce();
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+
+        bytes32 hash = _txHash(wallet, receiver, 1 ether, "", n);
+        assertGt(wallet.queued(hash), 0);
+
+        // Self-call via executor bypasses ETA — no warp needed
+        vm.prank(exec);
+        wallet.execute(address(wallet), 0, abi.encodeCall(Multisig.executeQueued, (receiver, 1 ether, "", n)), "");
+        assertEq(receiver.balance, 1 ether);
+        assertEq(wallet.queued(hash), 0);
+    }
+
+    function test_executeQueued_externalCallerStillWaits() public {
+        address exec = address(0xEEEE);
+        wallet = _deployFull(2, 1 days, exec, 1 ether);
+        address receiver = address(new Receiver());
+
+        uint32 n = wallet.nonce();
+        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
+        wallet.execute(receiver, 1 ether, "", sigs);
+
+        // Direct external call cannot bypass ETA
+        vm.expectRevert();
+        wallet.executeQueued(receiver, 1 ether, "", n);
+
+        // After delay, anyone can execute
+        vm.warp(block.timestamp + 1 days);
+        wallet.executeQueued(receiver, 1 ether, "", n);
+        assertEq(receiver.balance, 1 ether);
+    }
+
+    function test_cancelQueued_revertNotSelf() public {
         address exec = address(0xEEEE);
         wallet = _deployFull(2, 1 days, exec, 1 ether);
         address receiver = address(new Receiver());
@@ -1464,29 +1505,12 @@ contract MultisigTest is Test {
 
         bytes32 hash = _txHash(wallet, receiver, 1 ether, "", n);
 
-        // random caller cannot cancel
-        vm.prank(address(0xCAFE));
+        // direct call reverts (onlySelf)
+        vm.prank(exec);
         vm.expectRevert(Multisig.Unauthorized.selector);
         wallet.cancelQueued(hash);
 
-        // owner cannot cancel directly either
         vm.prank(owner1);
-        vm.expectRevert(Multisig.Unauthorized.selector);
-        wallet.cancelQueued(hash);
-    }
-
-    function test_cancelQueued_revertNoExecutorSet() public {
-        wallet = _deployWithDelay(2, 1 days);
-        vm.deal(address(wallet), 1 ether);
-        address receiver = address(new Receiver());
-
-        uint32 n = wallet.nonce();
-        bytes memory sigs = _sign(wallet, receiver, 1 ether, "", _pks2());
-        wallet.execute(receiver, 1 ether, "", sigs);
-
-        bytes32 hash = _txHash(wallet, receiver, 1 ether, "", n);
-
-        // no executor set, so nobody can cancel
         vm.expectRevert(Multisig.Unauthorized.selector);
         wallet.cancelQueued(hash);
     }
@@ -2045,9 +2069,9 @@ contract MultisigTest is Test {
         bytes32 hash1 = _txHash(wallet, receiver, 1 ether, "", n1);
         assertGt(wallet.queued(hash1), 0);
 
-        // Cancel
+        // Cancel via executor → self-call
         vm.prank(exec);
-        wallet.cancelQueued(hash1);
+        wallet.execute(address(wallet), 0, abi.encodeCall(Multisig.cancelQueued, (hash1)), "");
         assertEq(wallet.queued(hash1), 0);
 
         // Re-queue with new nonce
@@ -2376,9 +2400,9 @@ contract MultisigTest is Test {
         address exec = address(0xEEEE);
         wallet = _deployWithExecutor(2, exec);
 
-        // Cancel a hash that was never queued — no revert, just deletes 0
+        // Cancel a hash that was never queued via self-call — no revert, just deletes 0
         vm.prank(exec);
-        wallet.cancelQueued(bytes32(uint256(0xDEAD)));
+        wallet.execute(address(wallet), 0, abi.encodeCall(Multisig.cancelQueued, (bytes32(uint256(0xDEAD)))), "");
         // No revert
     }
 

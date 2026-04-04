@@ -41,6 +41,7 @@ contract DeadmanSwitch {
         require(msg.sender == c.beneficiary, Unauthorized());
         require(block.timestamp >= c.lastActivity + c.timeout, StillAlive());
         uint256 amount = multisig.balance;
+        require(amount != 0, StillAlive());
         IMultisig(multisig).execute(msg.sender, amount, "", "");
         emit Claimed(multisig, msg.sender, amount);
     }

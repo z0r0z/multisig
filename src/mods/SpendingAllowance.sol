@@ -34,12 +34,16 @@ contract SpendingAllowance {
     function spend(address multisig, address to, uint128 amount) public {
         Config storage c = configs[multisig];
         require(msg.sender == c.spender, Unauthorized());
-        if (block.timestamp >= c.lastReset + c.period) {
-            c.spent = 0;
-            c.lastReset = uint32(block.timestamp);
+        unchecked {
+            if (block.timestamp >= uint256(c.lastReset) + c.period) {
+                c.spent = 0;
+                c.lastReset = uint32(block.timestamp);
+            }
         }
         require(c.spent + amount <= c.allowance, OverLimit());
-        c.spent += amount;
+        unchecked {
+            c.spent += amount;
+        }
         IMultisig(multisig).execute(to, amount, "", "");
         emit Spent(multisig, to, amount);
     }

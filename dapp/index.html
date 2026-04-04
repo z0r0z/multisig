@@ -1,0 +1,1762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>MULTISIG</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'%3E%3Crect width='120' height='120' fill='%23000'/%3E%3Cpath d='M0,120V0H18L60,68 102,0H120V120H102V38L60,106 18,38V120Z' fill='%23fff'/%3E%3C/svg%3E" type="image/svg+xml">
+<link rel="stylesheet" href="./wallet.css">
+<link rel="stylesheet" href="./app.css">
+<script>
+try{var d=localStorage.getItem('dark');if(d==='1'||(d===null&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark')}catch(_){}
+</script>
+</head>
+<body>
+
+<button class="dark-toggle" onclick="toggleDark()" title="Toggle dark mode"></button>
+
+<div class="header">
+  <svg class="header-logo" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg"><path d="M0,120V0H18L60,68 102,0H120V120H102V38L60,106 18,38V120Z"/></svg>
+  <div><h1>MULTISIG</h1><p class="subtitle">a simple, efficient, timelocked multisig wallet</p></div>
+</div>
+
+<div class="net-bar">
+  <button class="net-btn active" data-chain="1" onclick="switchNet(1)">ethereum</button>
+  <span class="net-sep"></span>
+  <button class="net-btn" data-chain="8453" onclick="switchNet(8453)">base</button>
+  <span class="net-sep"></span>
+  <button class="net-btn" data-chain="42161" onclick="switchNet(42161)">arbitrum</button>
+  <span class="net-sep"></span>
+  <button class="net-btn" data-chain="10" onclick="switchNet(10)">optimism</button>
+  <span class="net-sep net-testnet"></span>
+  <button class="net-btn net-testnet" data-chain="11155111" onclick="switchNet(11155111)">sepolia</button>
+  <span class="net-sep net-testnet"></span>
+  <button class="net-btn net-testnet" data-chain="84532" onclick="switchNet(84532)">base sepolia</button>
+  <span class="net-sep net-testnet"></span>
+  <button class="net-btn net-testnet" data-chain="31337" onclick="switchNet(31337)">anvil</button>
+  <span class="net-sep"></span>
+  <button class="net-btn" onclick="toggleTestnets()" id="testnetToggle" style="opacity:0.35">testnet</button>
+</div>
+
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('create')">create</button>
+  <button class="tab" onclick="switchTab('manage')">manage</button>
+</div>
+
+<!-- ============ CREATE PANEL ============ -->
+<div id="panel-create" class="panel active">
+
+  <div class="section">
+    <label>owners</label>
+    <ul class="owner-list" id="ownerList"></ul>
+    <div class="owner-add">
+      <input type="text" id="newOwnerInput" placeholder="0x... or name.eth / name.wei" spellcheck="false" onkeydown="if(event.key==='Enter'){addOwner();event.preventDefault();}">
+      <button class="add-btn" onclick="addOwner()">+</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <label>threshold</label>
+    <div class="threshold-row">
+      <input type="number" id="threshold" value="1" min="1" max="1">
+      <span class="threshold-hint" id="thresholdHint">of 0 owners</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <button class="adv-toggle" onclick="toggleAdvanced()" id="advToggle">+ delay</button>
+    <div id="advancedSection" class="hidden mt">
+      <label>delay <span class="dim small">(minutes)</span></label>
+      <input type="number" id="delay" placeholder="0" min="0">
+    </div>
+  </div>
+
+  <div class="section">
+    <button onclick="deployMultisig()">deploy</button>
+  </div>
+
+  <div id="createStatus" class="status"></div>
+</div>
+
+<!-- ============ MANAGE PANEL ============ -->
+<div id="panel-manage" class="panel">
+
+  <div id="myWalletsSection" class="hidden">
+    <ul class="owner-list" id="myWalletsList"></ul>
+  </div>
+
+  <div class="section">
+    <label id="addrInputLabel">multisig address</label>
+    <div class="owner-add">
+      <input type="text" id="msAddr" placeholder="0x..." spellcheck="false">
+      <button class="add-btn" onclick="loadMultisig()">&#8594;</button>
+    </div>
+  </div>
+
+  <div id="msLoaded" class="hidden">
+
+    <!-- Overview -->
+    <div class="section">
+      <label>overview</label>
+      <div class="info-grid">
+        <div class="info-row"><span class="info-label">balance</span><span class="info-value" id="msBalance">&mdash;</span></div>
+        <div id="tokenBalances"></div>
+        <div class="info-row"><span class="info-label">threshold</span><span class="info-value" id="msThreshold">&mdash;</span></div>
+        <div class="info-row"><span class="info-label">delay</span><span class="info-value" id="msDelay">&mdash;</span></div>
+        <div class="info-row"><span class="info-label">nonce</span><span class="info-value" id="msNonce">&mdash;</span></div>
+        <div class="info-row"><span class="info-label">executor</span><span class="info-value addr" id="msExecutor">&mdash;</span></div>
+      </div>
+      <div class="mt">
+        <label>owners</label>
+        <ul class="owner-list" id="msOwners"></ul>
+      </div>
+      <button class="sm secondary" onclick="loadMultisig()">refresh</button>
+      <button class="sm secondary" onclick="shareMultisig(event)">share</button>
+    </div>
+
+    <!-- Pending proposals from DB -->
+    <div class="section hidden" id="pendingSection">
+      <label>pending proposals</label>
+      <ul class="owner-list" id="pendingList"></ul>
+    </div>
+
+    <!-- Sub-tabs -->
+    <div class="sub-tabs">
+      <button class="sub-tab active" onclick="switchSubTab('transact')">transact</button>
+      <button class="sub-tab" onclick="switchSubTab('approve')">approve</button>
+      <button class="sub-tab" onclick="switchSubTab('queue')">queue</button>
+      <button class="sub-tab" onclick="switchSubTab('settings')">settings</button>
+    </div>
+
+    <!-- TRANSACT sub-panel -->
+    <div id="sub-transact" class="sub-panel active">
+
+      <div class="section mb">
+        <button class="adv-toggle" onclick="toggleTxMode()" id="txModeToggle">custom call</button>
+      </div>
+
+      <!-- SEND mode (default) -->
+      <div id="txSendMode">
+        <div class="section">
+          <label>token</label>
+          <div class="token-row" id="tokenRow"></div>
+        </div>
+        <div class="section">
+          <label>amount</label>
+          <input type="text" id="sendAmount" placeholder="0.0" autocomplete="off">
+          <div class="dim small mt" id="sendBalance"></div>
+        </div>
+        <div class="section">
+          <label>to</label>
+          <input type="text" id="sendTo" placeholder="0x... or name.eth / name.wei" spellcheck="false">
+        </div>
+      </div>
+
+      <!-- CUSTOM CALL mode (hidden by default) -->
+      <div id="txCustomMode" class="hidden">
+        <div class="section">
+          <label>target</label>
+          <input type="text" id="txTarget" placeholder="0x..." spellcheck="false">
+        </div>
+        <div class="section">
+          <label>value <span class="dim small">(ETH)</span></label>
+          <input type="text" id="txValue" placeholder="0">
+        </div>
+        <div class="section">
+          <label>data <span class="dim small">(hex, 0x for empty)</span></label>
+          <textarea id="txData" placeholder="0x" spellcheck="false"></textarea>
+        </div>
+      </div>
+
+      <button class="add-btn" onclick="addToBatch()" title="Add to batch">+</button>
+
+      <!-- Batch list -->
+      <div id="batchSection" class="hidden">
+        <div class="section">
+          <label>batch <span class="dim small" id="batchCount">(0 calls)</span></label>
+          <ul class="owner-list" id="batchList"></ul>
+          <button class="adv-toggle" onclick="clearBatch()">clear</button>
+        </div>
+      </div>
+
+      <!-- Shared fields -->
+      <div class="section">
+        <label>nonce <span class="dim small">(auto-filled)</span></label>
+        <input type="number" id="txNonce" placeholder="0">
+      </div>
+      <div class="section">
+        <label>tx hash <span class="dim small">(auto-computed)</span></label>
+        <div class="inline-flex">
+          <span class="mono small" id="txHash">&mdash;</span>
+          <button class="copy-btn" onclick="copyText(document.getElementById('txHash').textContent)">copy</button>
+        </div>
+      </div>
+
+      <button class="secondary" onclick="signTx()">sign</button>
+
+      <div class="section mt">
+        <label>signatures <span class="dim small" id="sigCount">(0)</span></label>
+        <div class="sig-list" id="sigList"></div>
+        <div class="mt">
+          <label class="small">paste signature (hex)</label>
+          <div class="owner-add">
+            <input type="text" id="pasteSig" placeholder="0x..." spellcheck="false">
+            <button class="sm secondary" onclick="addSig()">+</button>
+          </div>
+        </div>
+      </div>
+
+      <button onclick="executeTx()">execute</button>
+      <div id="txStatus" class="status"></div>
+    </div>
+
+    <!-- APPROVE sub-panel -->
+    <div id="sub-approve" class="sub-panel">
+      <div class="section">
+        <label>hash to approve</label>
+        <input type="text" id="approveHash" placeholder="0x..." spellcheck="false">
+      </div>
+      <div class="section">
+        <label>check approval</label>
+        <div class="action-row">
+          <input type="text" id="approveCheckAddr" placeholder="owner address" spellcheck="false">
+          <button class="sm secondary" onclick="checkApproval()">check</button>
+        </div>
+        <span class="mono small" id="approvalResult"></span>
+      </div>
+      <button onclick="approveTx(true)">approve</button>
+      <button class="secondary danger" onclick="approveTx(false)">revoke</button>
+      <div id="approveStatus" class="status"></div>
+    </div>
+
+    <!-- QUEUE sub-panel -->
+    <div id="sub-queue" class="sub-panel">
+      <div class="section">
+        <label>check queued eta</label>
+        <div class="action-row">
+          <input type="text" id="queueHash" placeholder="tx hash" spellcheck="false">
+          <button class="sm secondary" onclick="checkQueued()">check</button>
+        </div>
+        <span class="mono small" id="queueEta"></span>
+      </div>
+
+      <div class="section mt">
+        <label>execute queued transaction</label>
+        <div class="section">
+          <label class="small">target</label>
+          <input type="text" id="qTarget" placeholder="0x..." spellcheck="false">
+        </div>
+        <div class="section">
+          <label class="small">value (ETH)</label>
+          <input type="text" id="qValue" placeholder="0">
+        </div>
+        <div class="section">
+          <label class="small">data (hex)</label>
+          <textarea id="qData" placeholder="0x" spellcheck="false"></textarea>
+        </div>
+        <div class="section">
+          <label class="small">nonce</label>
+          <input type="number" id="qNonce" placeholder="0">
+        </div>
+        <button onclick="executeQueued()">execute queued</button>
+      </div>
+
+      <div class="section mt">
+        <label>cancel queued <span class="dim small">(threshold sigs via executor)</span></label>
+        <div class="action-row">
+          <input type="text" id="cancelHash" placeholder="tx hash" spellcheck="false">
+          <button class="sm danger" onclick="cancelQueued()">cancel</button>
+        </div>
+      </div>
+      <div id="queueStatus" class="status"></div>
+    </div>
+
+    <!-- SETTINGS sub-panel -->
+    <div id="sub-settings" class="sub-panel">
+      <p class="small dim mb">Settings changes require a self-call — builds the calldata and pre-fills the transact form.</p>
+
+      <div class="section">
+        <label>add owner</label>
+        <div class="action-row">
+          <input type="text" id="setAddOwner" placeholder="0x... or name.eth / name.wei" spellcheck="false">
+          <button class="sm secondary" onclick="buildSettingsTx('addOwner')">build tx</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <label>remove owner</label>
+        <div class="action-row">
+          <select id="setRemoveOwner"></select>
+          <button class="sm secondary" onclick="buildSettingsTx('removeOwner')">build tx</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <label>set threshold</label>
+        <div class="action-row">
+          <input type="number" id="setThreshold" placeholder="new threshold" min="1">
+          <button class="sm secondary" onclick="buildSettingsTx('setThreshold')">build tx</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <label>set delay <span class="dim small">(minutes)</span></label>
+        <div class="action-row">
+          <input type="number" id="setDelay" placeholder="new delay" min="0">
+          <button class="sm secondary" onclick="buildSettingsTx('setDelay')">build tx</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <label>executor module</label>
+        <div class="action-row">
+          <input type="text" id="setExecutor" placeholder="module address" spellcheck="false">
+          <button class="sm secondary" onclick="buildSettingsTx('addExecutor')">add</button>
+          <button class="sm secondary danger" onclick="buildSettingsTx('removeExecutor')">remove</button>
+        </div>
+      </div>
+
+      <div id="settingsStatus" class="status"></div>
+    </div>
+
+  </div><!-- #msLoaded -->
+</div><!-- panel-manage -->
+
+<script src="./ethers.min.js"></script>
+<script src="./walletconnect.min.js"></script>
+<script src="./wallet.js"></script>
+<script src="./supabase.min.js"></script>
+<script>
+'use strict';
+
+// --- CHAIN CONFIG ---
+const CHAINS = {
+  1:        { name:'Ethereum',     rpcs:['https://ethereum.publicnode.com','https://1rpc.io/eth','https://eth.drpc.org'],             explorer:'https://etherscan.io',           hex:'0x1' },
+  8453:     { name:'Base',         rpcs:['https://base.publicnode.com','https://1rpc.io/base','https://base.drpc.org'],               explorer:'https://basescan.org',           hex:'0x2105' },
+  42161:    { name:'Arbitrum',    rpcs:['https://arbitrum-one.publicnode.com','https://1rpc.io/arb','https://arbitrum.drpc.org'],    explorer:'https://arbiscan.io',            hex:'0xa4b1' },
+  10:       { name:'OP Mainnet', rpcs:['https://optimism.publicnode.com','https://1rpc.io/op','https://optimism.drpc.org'],       explorer:'https://optimistic.etherscan.io', hex:'0xa' },
+  11155111: { name:'Sepolia',      rpcs:['https://ethereum-sepolia.publicnode.com','https://1rpc.io/sepolia','https://sepolia.drpc.org'], explorer:'https://sepolia.etherscan.io',   hex:'0xaa36a7' },
+  84532:    { name:'Base Sepolia', rpcs:['https://base-sepolia.publicnode.com','https://sepolia.base.org'],                           explorer:'https://sepolia.basescan.org',   hex:'0x14a34' },
+  31337:    { name:'Anvil',        rpcs:['http://127.0.0.1:8545'],                                                                    explorer:'',                               hex:'0x7a69' },
+};
+
+function makeProvider(id) {
+  const c = CHAINS[id];
+  if(c.rpcs.length === 1) return new ethers.JsonRpcProvider(c.rpcs[0], id, {staticNetwork:true});
+  return new ethers.FallbackProvider(c.rpcs.map((url, i) =>
+    ({ provider: new ethers.JsonRpcProvider(url, id, {staticNetwork:true}), priority: i + 1, stallTimeout: 2000 })
+  ), id);
+}
+
+// Factory addresses per chain (placeholder — update after deployment)
+const FACTORY = {
+  1:        '0x0000000000000000000000000000000000000000',
+  8453:     '0x0000000000000000000000000000000000000000',
+  42161:    '0x0000000000000000000000000000000000000000',
+  10:       '0x0000000000000000000000000000000000000000',
+  11155111: '0x0000000000000000000000000000000000000000',
+  84532:    '0x0000000000000000000000000000000000000000',
+  31337:    '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+};
+
+const ADD_CHAIN_PARAMS = {
+  8453:     { chainId:'0x2105',  chainName:'Base',          rpcUrls:['https://mainnet.base.org'],                blockExplorerUrls:['https://basescan.org'],         nativeCurrency:{name:'ETH',symbol:'ETH',decimals:18} },
+  42161:    { chainId:'0xa4b1', chainName:'Arbitrum One',  rpcUrls:['https://arb1.arbitrum.io/rpc'],            blockExplorerUrls:['https://arbiscan.io'],          nativeCurrency:{name:'ETH',symbol:'ETH',decimals:18} },
+  10:       { chainId:'0xa',   chainName:'OP Mainnet',   rpcUrls:['https://mainnet.optimism.io'],             blockExplorerUrls:['https://optimistic.etherscan.io'], nativeCurrency:{name:'ETH',symbol:'ETH',decimals:18} },
+  84532:    { chainId:'0x14a34', chainName:'Base Sepolia',   rpcUrls:['https://sepolia.base.org'],                blockExplorerUrls:['https://sepolia.basescan.org'],  nativeCurrency:{name:'ETH',symbol:'ETH',decimals:18} },
+  11155111: { chainId:'0xaa36a7',chainName:'Sepolia',        rpcUrls:['https://ethereum-sepolia.publicnode.com'], blockExplorerUrls:['https://sepolia.etherscan.io'],  nativeCurrency:{name:'ETH',symbol:'ETH',decimals:18} },
+  31337:    { chainId:'0x7a69',  chainName:'Anvil',          rpcUrls:['http://127.0.0.1:8545'],                   blockExplorerUrls:[],                                nativeCurrency:{name:'ETH',symbol:'ETH',decimals:18} },
+};
+
+// WNS (used for forward resolution — wallet.js handles reverse)
+const WEINS = '0x0000000000696760E15f265e828DB644A0c242EB';
+const WEINS_ABI = [
+  'function computeId(string) pure returns (uint256)',
+  'function ownerOf(uint256) view returns (address)',
+];
+
+// Supabase
+const SB_KEY = 'sb_publishable_HCQ27VwozIa8TaSY4h91YA__Pn1N4Id';
+const sb = supabase.createClient('https://aihmwudzejkjsbgfawms.supabase.co', SB_KEY);
+
+// Multicall3 — same address on all EVM chains
+const MC3 = '0xcA11bde05977b3631167028862bE2a173976CA11';
+const MC3_ABI = ['function aggregate3((address target, bool allowFailure, bytes callData)[] calls) view returns ((bool success, bytes returnData)[] results)'];
+
+// --- ABI ---
+const MULTISIG_ABI = [
+  'function delay() view returns (uint32)',
+  'function nonce() view returns (uint32)',
+  'function threshold() view returns (uint16)',
+  'function ownerCount() view returns (uint16)',
+  'function executor() view returns (address)',
+  'function getOwners() view returns (address[])',
+  'function isOwner(address) view returns (bool)',
+
+  'function execute(address,uint256,bytes,bytes) payable',
+  'function executeQueued(address,uint256,bytes,uint32) payable',
+  'function approve(bytes32,bool) payable',
+  'function cancelQueued(bytes32) payable',
+  'function addOwner(address) payable',
+  'function removeOwner(address,address) payable',
+  'function setDelay(uint32) payable',
+  'function setExecutor(address) payable',
+  'function setThreshold(uint256) payable',
+  'function batch(address[],uint256[],bytes[]) payable',
+  'function queued(bytes32) view returns (uint256)',
+  'function approved(address,bytes32) view returns (bool)',
+  'function DOMAIN_SEPARATOR() view returns (bytes32)',
+  'event ExecutionSuccess(bytes32 indexed txHash, uint256 nonce)',
+  'event Queued(bytes32 indexed txHash, uint256 nonce, uint256 eta)',
+  'event Created(address indexed wallet)',
+];
+
+const TIMELOCK_EXECUTOR_ABI = [
+  'function forwardEnabled(address) view returns (bool)',
+  'function enableForward(bool)',
+  'function forward(address,address,uint256,bytes,bytes)',
+];
+const tlIface = new ethers.Interface(TIMELOCK_EXECUTOR_ABI);
+
+const FACTORY_ABI = [
+  'function implementation() view returns (address)',
+  'function create(address[],uint32,uint256,address,uint256) payable returns (address)',
+  'function createWithCalls(address[],uint32,uint256,address,uint256,address[],uint256[],bytes[]) payable returns (address)',
+  'event Created(address indexed wallet)',
+];
+
+// --- STATE ---
+let chainId = parseInt(localStorage.getItem('ms_chain') || '1');
+let provider = null;
+let signer = null;
+let connectedAddress = null;
+let msContract = null;
+let msAddress = null;
+let owners = [];
+let collectedSigs = [];
+let loadedOwners = [];
+let testnetsVisible = localStorage.getItem('ms_testnet') === '1';
+let isTimelockExecutor = false;
+let tlForwardEnabled = false;
+const SENTINEL = '0x0000000000000000000000000000000000000001';
+const msIface = new ethers.Interface(MULTISIG_ABI);
+
+// --- Wallet (delegates to wallet.js) ---
+
+const _esc = s => String(s).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
+
+function syncWallet() {
+  signer = window._signer;
+  connectedAddress = window._connectedAddress;
+}
+
+async function onWalletConnect() {
+  syncWallet();
+  // Verify wallet is on the expected chain
+  if(window._connectedWalletProvider) {
+    try {
+      const wc = await window._connectedWalletProvider.request({method:'eth_chainId'});
+      const walletChain = parseInt(wc, 16);
+      if(walletChain !== chainId && CHAINS[walletChain]) {
+        // Wallet is on a different supported chain — sync to it
+        chainId = walletChain;
+        localStorage.setItem('ms_chain', String(chainId));
+        provider = makeProvider(chainId);
+        updateNetButtons();
+      }
+    } catch(_) {}
+  }
+  loadMyWallets();
+  if(!owners.length && document.getElementById('panel-create').classList.contains('active')) {
+    owners.push(connectedAddress);
+    renderOwners();
+  }
+}
+
+function onWalletDisconnect() {
+  signer = null; connectedAddress = null;
+}
+
+// --- Name resolution ---
+
+const ethMainRpc = makeProvider(1);
+
+async function resolveName(input) {
+  const v = input.trim();
+  if(!v) throw new Error('Empty input');
+  if(ethers.isAddress(v)) return ethers.getAddress(v);
+
+  if(v.endsWith('.wei')) {
+    const ns = new ethers.Contract(WEINS, WEINS_ABI, ethMainRpc);
+    const tokenId = await ns.computeId(v);
+    const owner = await ns.ownerOf(tokenId);
+    if(!owner || owner === ethers.ZeroAddress) throw new Error(`${v} not found`);
+    return ethers.getAddress(owner);
+  }
+
+  if(v.endsWith('.eth')) {
+    const addr = await ethMainRpc.resolveName(v);
+    if(!addr) throw new Error(`${v} not found`);
+    return ethers.getAddress(addr);
+  }
+
+  throw new Error('Enter an address, .eth, or .wei name');
+}
+
+// --- THEME ---
+window.toggleDark = function() {
+  const dark = !document.documentElement.classList.contains('dark');
+  document.documentElement.classList.toggle('dark', dark);
+  localStorage.setItem('dark', dark?'1':'0');
+};
+
+// --- NETWORK SWITCHING ---
+function updateNetButtons() {
+  document.querySelectorAll('.net-btn[data-chain]').forEach(b => b.classList.toggle('active', parseInt(b.dataset.chain)===chainId));
+  document.querySelectorAll('.net-testnet').forEach(el => el.classList.toggle('show', testnetsVisible));
+  const toggle = document.getElementById('testnetToggle');
+  if(toggle) toggle.style.opacity = testnetsVisible ? '0.7' : '0.35';
+}
+
+window.switchNet = async function(id) {
+  chainId = id;
+  localStorage.setItem('ms_chain', String(id));
+  provider = makeProvider(id);
+  walletDbId = null;
+  updateNetButtons();
+  await walletSwitchChain({ chainId: id, chainHex: CHAINS[id].hex, rpc: CHAINS[id].rpcs[0], addChainParams: ADD_CHAIN_PARAMS[id] || null });
+  loadMyWallets();
+  if(msAddress) loadMultisig();
+};
+
+window.toggleTestnets = function() {
+  testnetsVisible = !testnetsVisible;
+  localStorage.setItem('ms_testnet', testnetsVisible?'1':'0');
+  updateNetButtons();
+};
+
+// --- TAB / SUBTAB SWITCHING ---
+window.switchTab = function(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.textContent.trim().toLowerCase()===tab));
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id===`panel-${tab}`));
+};
+
+window.switchSubTab = function(tab) {
+  document.querySelectorAll('.sub-tab').forEach(t => t.classList.toggle('active', t.textContent.trim().toLowerCase()===tab));
+  document.querySelectorAll('.sub-panel').forEach(p => p.classList.toggle('active', p.id===`sub-${tab}`));
+};
+
+window.toggleAdvanced = function() {
+  const sec = document.getElementById('advancedSection');
+  const btn = document.getElementById('advToggle');
+  sec.classList.toggle('hidden');
+  btn.textContent = sec.classList.contains('hidden') ? '+ delay' : '- delay';
+};
+
+// --- STATUS HELPERS ---
+function showStatus(id, msg, ok) {
+  const el = document.getElementById(id);
+  el.className = 'status show ' + (ok?'ok':'err');
+  el.innerHTML = msg;
+}
+function clearStatus(id) {
+  const el = document.getElementById(id);
+  el.className = 'status'; el.innerHTML = '';
+}
+function explorerLink(hash, type='address') {
+  const url = CHAINS[chainId].explorer;
+  if(!url) return `<span class="mono">${hash}</span>`;
+  return `<a href="${url}/${type}/${hash}" target="_blank" rel="noopener">${hash}</a>`;
+}
+function copyText(text) { navigator.clipboard.writeText(text).catch(()=>{}); }
+window.copyText = copyText;
+
+window.shareMultisig = function(e) {
+  const url = location.origin + location.pathname + `#${chainId}/${msAddress}`;
+  const btn = e?.target || this;
+  navigator.clipboard.writeText(url).then(() => {
+    btn.textContent = 'copied';
+    setTimeout(() => btn.textContent = 'share', 1500);
+  }).catch(() => {});
+};
+
+// --- CREATE — OWNER MANAGEMENT ---
+function updateThresholdMax() {
+  const input = document.getElementById('threshold');
+  input.max = owners.length || 1;
+  if(parseInt(input.value) > owners.length && owners.length > 0) input.value = owners.length;
+  document.getElementById('thresholdHint').textContent = `of ${owners.length} owner${owners.length !== 1 ? 's' : ''}`;
+}
+
+function renderOwners() {
+  const list = document.getElementById('ownerList');
+  list.innerHTML = owners.map((o,i) =>
+    `<li class="owner-item"><span>${o}</span><button class="sm danger" onclick="removeOwnerCreate(${i})">&#215;</button></li>`
+  ).join('');
+  updateThresholdMax();
+}
+
+window.addOwner = async function() {
+  const input = document.getElementById('newOwnerInput');
+  const raw = input.value.trim();
+  if(!raw) return;
+  try {
+    input.disabled = true;
+    const checksummed = await resolveName(raw);
+    if(owners.includes(checksummed)) { input.disabled = false; return alert('Already added'); }
+    owners.push(checksummed);
+    owners.sort((a,b) => a.toLowerCase() < b.toLowerCase() ? -1 : 1);
+    renderOwners();
+    input.value = '';
+  } catch(e) { alert(e.message); }
+  input.disabled = false;
+};
+
+window.removeOwnerCreate = function(i) {
+  owners.splice(i, 1);
+  renderOwners();
+};
+
+// --- CREATE2 vanity mining ---
+
+function buildInitcode(impl) {
+  return '0x602d5f8160095f39f35f5f365f5f37365f73' + impl.slice(2).toLowerCase() + '5af43d5f5f3e6029573d5ffd5b3d5ff3';
+}
+
+async function mineVanitySalt(factory, impl, caller) {
+  const hash = ethers.keccak256(buildInitcode(impl));
+  const base = BigInt(caller) << 96n;
+  for(let n = 0n; ; n++) {
+    const salt = '0x' + (base | n).toString(16).padStart(64, '0');
+    const addr = ethers.getCreate2Address(factory, salt, hash);
+    if(addr.slice(2, 4) === '00') return { salt: base | n, address: addr, nonce: n };
+    if(n > 0n && n % 5000n === 0n) await new Promise(r => setTimeout(r, 0));
+  }
+}
+
+// --- CREATE — DEPLOY ---
+window.deployMultisig = async function() {
+  clearStatus('createStatus');
+  if(!signer) return showStatus('createStatus', 'Connect wallet first', false);
+  if(!owners.length) return showStatus('createStatus', 'Add at least one owner', false);
+
+  const factoryAddr = FACTORY[chainId];
+  if(!factoryAddr || factoryAddr === ethers.ZeroAddress) {
+    return showStatus('createStatus', `Factory not deployed on ${CHAINS[chainId].name} yet`, false);
+  }
+
+  const thresh = Math.min(parseInt(document.getElementById('threshold').value) || 1, owners.length);
+  const del = (parseInt(document.getElementById('delay').value) || 0) * 60;
+
+  try {
+    // 1. Read implementation address from factory
+    showStatus('createStatus', 'Reading factory...', true);
+    const factory = new ethers.Contract(factoryAddr, FACTORY_ABI, signer);
+    const impl = await factory.implementation();
+
+    // 2. Mine vanity salt (leading zero byte)
+    showStatus('createStatus', 'Mining vanity address...', true);
+    const result = await mineVanitySalt(factoryAddr, impl, connectedAddress);
+    showStatus('createStatus',
+      `Found: <span class="mono">${result.address}</span> (${result.nonce.toString()} attempts)<br>Deploying...`, true);
+
+    // 3. Deploy — executor = zero, salt = mined
+    const tx = await factory.create(owners, del, thresh, ethers.ZeroAddress, result.salt);
+    showStatus('createStatus', `Tx: ${explorerLink(tx.hash, 'tx')}<br>Waiting for confirmation...`, true);
+    const receipt = await tx.wait();
+
+    // 4. Parse Created event
+    const iface = new ethers.Interface(FACTORY_ABI);
+    let walletAddr = null;
+    for(const log of receipt.logs) {
+      try { const parsed = iface.parseLog(log); if(parsed?.name === 'Created') { walletAddr = parsed.args[0]; break; } } catch(_){}
+    }
+
+    if(walletAddr) {
+      // Register in Supabase
+      try {
+        await dbRegisterWallet(walletAddr, connectedAddress, result.salt, owners, thresh, del, ethers.ZeroAddress, Number(receipt.blockNumber), receipt.hash);
+      } catch(e) { console.error('DB register failed:', e); }
+      showStatus('createStatus',
+        `Deployed: ${explorerLink(walletAddr)}<br><button class="sm secondary" onclick="document.getElementById('msAddr').value='${walletAddr}';switchTab('manage');loadMultisig();">manage &#8594;</button>`, true);
+    } else {
+      showStatus('createStatus', `Confirmed: ${explorerLink(receipt.hash, 'tx')}`, true);
+    }
+  } catch(e) {
+    console.error(e);
+    showStatus('createStatus', e.shortMessage || e.message, false);
+  }
+};
+
+// --- MANAGE — LOAD MULTISIG ---
+window.loadMultisig = async function() {
+  const addr = document.getElementById('msAddr').value.trim();
+  if(!ethers.isAddress(addr)) return alert('Invalid address');
+  msAddress = ethers.getAddress(addr);
+  localStorage.setItem('ms_addr_' + chainId, msAddress);
+  history.replaceState(null, '', `#${chainId}/${msAddress}`);
+
+  try {
+    msContract = new ethers.Contract(msAddress, MULTISIG_ABI, provider);
+
+    // Batched read via Multicall3
+    const s = await multicallLoad(msAddress);
+    loadedOwners = [...s.owners];
+
+    document.getElementById('msBalance').textContent = ethers.formatEther(s.balance) + ' ETH';
+    document.getElementById('msThreshold').textContent = `${s.threshold} of ${s.owners.length}`;
+    document.getElementById('msDelay').textContent = s.delay == 0 ? 'none' : s.delay < 60 ? `${s.delay}s` : s.delay < 3600 ? `${s.delay/60}m` : `${s.delay/3600}h`;
+    document.getElementById('msNonce').textContent = String(s.nonce);
+    document.getElementById('msExecutor').textContent = s.executor === ethers.ZeroAddress ? 'none' : s.executor;
+    document.getElementById('txNonce').value = String(s.nonce);
+
+    // Detect TimelockExecutor — probe forwardEnabled to confirm it's the right contract
+    isTimelockExecutor = false;
+    tlForwardEnabled = false;
+    if(s.executor !== ethers.ZeroAddress) {
+      try {
+        const tlContract = new ethers.Contract(s.executor, TIMELOCK_EXECUTOR_ABI, provider);
+        tlForwardEnabled = await tlContract.forwardEnabled(msAddress);
+        isTimelockExecutor = true; // call succeeded — it's a TimelockExecutor
+      } catch(_) {}
+    }
+    if(isTimelockExecutor) {
+      const label = tlForwardEnabled ? 'timelock executor (forward enabled)' : 'timelock executor (cancel only)';
+      document.getElementById('msExecutor').textContent = label;
+    }
+
+    document.getElementById('msOwners').innerHTML = s.owners.map(o =>
+      `<li class="owner-item"><span>${o}</span><button class="copy-btn" onclick="copyText('${o}')">copy</button></li>`
+    ).join('');
+
+    document.getElementById('msLoaded').classList.remove('hidden');
+    document.getElementById('setRemoveOwner').innerHTML = s.owners.map(o =>
+      `<option value="${o}">${o.slice(0,8)}...${o.slice(-6)}</option>`
+    ).join('');
+    collectedSigs = [];
+    batchCalls = [];
+    renderSigs();
+    renderBatch();
+    renderTokenRow();
+
+    // Parallel: token balances, send balance, and DB context
+    const [, , dbWallet] = await Promise.all([
+      loadTokenBalances(msAddress, s.balance),
+      updateSendBalance(),
+      dbFindWallet(msAddress),
+    ]);
+    walletDbId = dbWallet?.id || null;
+    if(walletDbId) loadPending();
+    else document.getElementById('pendingSection').classList.add('hidden');
+  } catch(e) {
+    console.error(e);
+    alert('Failed to load: ' + (e.shortMessage || e.message));
+  }
+};
+
+// --- Token list & send mode ---
+
+const ETH_ICON = `<svg width="14" height="14" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><polygon fill="#80D8FF" points="7.62,18.83 16.01,30.5 16.01,24.1"/><polygon fill="#42A5F5" points="16.01,30.5 24.38,18.78 16.01,24.1"/><polygon fill="#FFF176" points="16.01,1.5 7.62,16.23 16.01,12.3"/><polygon fill="#FF8A80" points="24.38,16.18 16.01,1.5 16.01,12.3"/><polygon fill="#C1AEE1" points="16.01,21.5 24.38,16.18 16.01,12.3"/><polygon fill="#55FB9B" points="16.01,12.3 7.62,16.23 16.01,21.5"/></svg>`;
+const USDC_ICON = `<svg width="14" height="14" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><circle fill="#2775CA" cx="16" cy="16" r="16"/><g fill="#FFF"><path d="M20.022 18.124c0-2.124-1.28-2.852-3.84-3.156-1.828-.243-2.193-.728-2.193-1.578 0-.85.61-1.396 1.828-1.396 1.097 0 1.707.364 2.011 1.275a.458.458 0 00.427.303h.975a.416.416 0 00.427-.425v-.06a3.04 3.04 0 00-2.743-2.489V9.142c0-.243-.183-.425-.487-.486h-.915c-.243 0-.426.182-.487.486v1.396c-1.829.242-2.986 1.456-2.986 2.974 0 2.002 1.218 2.791 3.778 3.095 1.707.303 2.255.668 2.255 1.639 0 .97-.853 1.638-2.011 1.638-1.585 0-2.133-.667-2.316-1.578-.06-.242-.244-.364-.427-.364h-1.036a.416.416 0 00-.426.425v.06c.243 1.518 1.219 2.61 3.23 2.914v1.457c0 .242.183.425.487.485h.915c.243 0 .426-.182.487-.485V21.34c1.829-.303 3.047-1.578 3.047-3.217z"/><path d="M12.892 24.497c-4.754-1.7-7.192-6.98-5.424-11.653.914-2.55 2.925-4.491 5.424-5.402.244-.121.365-.303.365-.607v-.85c0-.242-.121-.424-.365-.485-.061 0-.183 0-.244.06a10.895 10.895 0 00-7.13 13.717c1.096 3.4 3.717 6.01 7.13 7.102.244.121.488 0 .548-.243.061-.06.061-.122.061-.243v-.85c0-.182-.182-.424-.365-.546zm6.46-18.936c-.244-.122-.488 0-.548.242-.061.061-.061.122-.061.243v.85c0 .243.182.485.365.607 4.754 1.7 7.192 6.98 5.424 11.653-.914 2.55-2.925 4.491-5.424 5.402-.244.121-.365.303-.365.607v.85c0 .242.121.424.365.485.061 0 .183 0 .244-.06a10.895 10.895 0 007.13-13.717c-1.096-3.46-3.778-6.07-7.13-7.162z"/></g></svg>`;
+const USDT_ICON = `<svg width="14" height="14" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><circle cx="16" cy="16" r="16" fill="#26A17B"/><path fill="#FFF" d="M17.922 17.383v-.002c-.11.008-.677.042-1.942.042-1.01 0-1.721-.03-1.971-.042v.003c-3.888-.171-6.79-.848-6.79-1.658 0-.809 2.902-1.486 6.79-1.66v2.644c.254.018.982.061 1.988.061 1.207 0 1.812-.05 1.925-.06v-2.643c3.88.173 6.775.85 6.775 1.658 0 .81-2.895 1.485-6.775 1.657m0-3.59v-2.366h5.414V7.819H8.595v3.608h5.414v2.365c-4.4.202-7.709 1.074-7.709 2.118 0 1.044 3.309 1.915 7.709 2.118v7.582h3.913v-7.584c4.393-.202 7.694-1.073 7.694-2.116 0-1.043-3.301-1.914-7.694-2.117"/></svg>`;
+const DAI_ICON = `<svg width="14" height="14" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><circle fill="#F4B731" cx="16" cy="16" r="16"/><path fill="#FFF" d="M9.277 8h6.552c3.985 0 7.006 2.116 8.13 5.194H26v1.861h-1.611c.031.294.047.594.047.898v.046c0 .342-.02.68-.06 1.01H26v1.86h-2.08C22.767 21.905 19.77 24 15.83 24H9.277v-5.131H7v-1.86h2.277v-1.954H7v-1.86h2.277V8zm1.831 10.869v3.462h4.72c2.914 0 5.078-1.387 6.085-3.462H11.108zm11.366-1.86H11.108v-1.954h11.37c.041.307.063.622.063.944v.045c0 .329-.023.65-.067.964zM15.83 9.665c2.926 0 5.097 1.424 6.098 3.528h-10.82V9.666h4.72z"/></svg>`;
+const WBTC_ICON = `<svg width="14" height="14" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><circle cx="16" cy="16" r="16" fill="#F7931A"/><path fill="#FFF" d="M23.189 14.02c.314-2.096-1.283-3.223-3.465-3.975l.708-2.84-1.728-.43-.69 2.765c-.454-.114-.92-.22-1.385-.326l.695-2.783L15.596 6l-.708 2.839c-.376-.086-.746-.17-1.104-.26l.002-.009-2.384-.595-.46 1.846s1.283.294 1.256.312c.7.175.826.638.805 1.006l-.806 3.235c.048.012.11.03.18.057l-.183-.045-1.13 4.532c-.086.212-.303.531-.793.41.018.025-1.256-.313-1.256-.313l-.858 1.978 2.25.561c.418.105.828.215 1.231.318l-.715 2.872 1.727.43.708-2.84c.472.127.93.245 1.378.357l-.706 2.828 1.728.43.715-2.866c2.948.558 5.164.333 6.097-2.333.752-2.146-.037-3.385-1.588-4.192 1.13-.26 1.98-1.003 2.207-2.538zm-3.95 5.538c-.533 2.147-4.148.986-5.32.695l.95-3.805c1.172.293 4.929.872 4.37 3.11zm.535-5.569c-.487 1.953-3.495.96-4.47.717l.86-3.45c.975.243 4.118.696 3.61 2.733z"/></svg>`;
+
+const ERC20_ABI = [
+  'function transfer(address to, uint256 amount) returns (bool)',
+  'function balanceOf(address) view returns (uint256)',
+  'function decimals() view returns (uint8)',
+  'function symbol() view returns (string)',
+];
+const erc20Iface = new ethers.Interface(ERC20_ABI);
+
+// Default tokens per chain. ETH address = zero address.
+const WSTETH_ICON = `<svg width="14" height="14" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><g fill="none"><circle fill="#00A3FF" cx="16" cy="16" r="16"/><path d="M9.437 14.864l-.181.275c-2.048 3.097-1.603 7.253 1.034 9.824 1.561 1.521 3.622 2.353 5.683 2.353 0 0 0 0-6.536-12.452z" fill="#FFF"/><path opacity=".6" d="M15.997 18.611l-6.56-3.747c6.56 12.452 6.56 12.452 6.56 12.452 0-2.683 0-5.623 0-8.705z" fill="#FFF"/><path opacity=".6" d="M22.563 14.864l.181.275c2.048 3.097 1.603 7.253-1.034 9.824-1.561 1.521-3.622 2.353-5.683 2.353 0 0 0 0 6.536-12.452z" fill="#FFF"/><path opacity=".2" d="M16.003 18.611l6.56-3.747c-6.56 12.452-6.56 12.452-6.56 12.452 0-2.683 0-5.623 0-8.705z" fill="#FFF"/><path opacity=".2" d="M16.004 10.239v6.459l5.654-3.23-5.654-3.229z" fill="#FFF"/><path opacity=".6" d="M16.005 10.239l-5.655 3.229 5.655 3.23v-6.46z" fill="#FFF"/><path d="M16.005 4.805l-5.655 8.668 5.655-3.233V4.805z" fill="#FFF"/><path opacity=".6" d="M16.004 10.238l5.658 3.23-5.658-8.674v5.444z" fill="#FFF"/></g></svg>`;
+
+const ETH_ONLY = [{ symbol:'ETH', address:ethers.ZeroAddress, decimals:18, icon:ETH_ICON }];
+
+const TOKENS = {
+  1: [
+    { symbol:'ETH',    address:ethers.ZeroAddress,                              decimals:18, icon:ETH_ICON },
+    { symbol:'USDC',   address:'0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',   decimals:6,  icon:USDC_ICON },
+    { symbol:'USDT',   address:'0xdAC17F958D2ee523a2206206994597C13D831ec7',   decimals:6,  icon:USDT_ICON },
+    { symbol:'DAI',    address:'0x6B175474E89094C44Da98b954EedeAC495271d0F',   decimals:18, icon:DAI_ICON },
+    { symbol:'WBTC',   address:'0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',   decimals:8,  icon:WBTC_ICON },
+    { symbol:'wstETH', address:'0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0',   decimals:18, icon:WSTETH_ICON },
+  ],
+  8453: [
+    { symbol:'ETH',    address:ethers.ZeroAddress,                              decimals:18, icon:ETH_ICON },
+    { symbol:'USDC',   address:'0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',   decimals:6,  icon:USDC_ICON },
+    { symbol:'USDT',   address:'0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2',   decimals:6,  icon:USDT_ICON },
+    { symbol:'DAI',    address:'0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb',   decimals:18, icon:DAI_ICON },
+    { symbol:'cbBTC',  address:'0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf',   decimals:8,  icon:WBTC_ICON },
+    { symbol:'wstETH', address:'0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452',   decimals:18, icon:WSTETH_ICON },
+  ],
+  42161: [
+    { symbol:'ETH',    address:ethers.ZeroAddress,                              decimals:18, icon:ETH_ICON },
+    { symbol:'USDC',   address:'0xaf88d065e77c8cC2239327C5EDb3A432268e5831',   decimals:6,  icon:USDC_ICON },
+    { symbol:'USDT',   address:'0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',   decimals:6,  icon:USDT_ICON },
+    { symbol:'DAI',    address:'0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1',   decimals:18, icon:DAI_ICON },
+    { symbol:'WBTC',   address:'0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f',   decimals:8,  icon:WBTC_ICON },
+    { symbol:'wstETH', address:'0x5979D7b546E38E414F7E9822514be443A4800529',   decimals:18, icon:WSTETH_ICON },
+  ],
+  10: [
+    { symbol:'ETH',    address:ethers.ZeroAddress,                              decimals:18, icon:ETH_ICON },
+    { symbol:'USDC',   address:'0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85',   decimals:6,  icon:USDC_ICON },
+    { symbol:'USDT',   address:'0x94b008aA00579c1307B0EF2c499aD98a8ce58e58',   decimals:6,  icon:USDT_ICON },
+    { symbol:'DAI',    address:'0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1',   decimals:18, icon:DAI_ICON },
+    { symbol:'WBTC',   address:'0x68f180fcCe6836688e9084f035309E29Bf0A2095',   decimals:8,  icon:WBTC_ICON },
+    { symbol:'wstETH', address:'0x1F32b1c2345538c0c6f582fCB022739c4A194Ebb',   decimals:18, icon:WSTETH_ICON },
+  ],
+};
+
+// Chainlink USD price feeds (non-stables only — stables assumed $1)
+// BTC/USD used for WBTC/cbBTC (peg risk accepted). wstETH omitted where no reliable USD feed exists.
+const CHAINLINK_FEEDS = {
+  1: {
+    'ETH':    '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419', // ETH/USD
+    'WBTC':   '0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c', // BTC/USD
+  },
+  8453: {
+    'ETH':    '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70', // ETH/USD
+    'cbBTC':  '0x07DA0E54543a844a80ABE69c8A12F22B3aA59f9D', // cbBTC/USD
+  },
+  42161: {
+    'ETH':    '0x639Fe6ab55C613B19FfBc10bd51CdeB9585D6EB6', // ETH/USD
+    'WBTC':   '0xd0C7101eACbB49F3deCcCc166d238410D6D46d57', // BTC/USD
+  },
+  10: {
+    'ETH':    '0x13e3Ee699D1909E989722E753853AE30b17e08c5', // ETH/USD
+    'WBTC':   '0x718A5788b89454aAE3A028AE9c111A29Be6c2a6F', // BTC/USD
+  },
+};
+const CHAINLINK_ABI = ['function latestAnswer() view returns (int256)'];
+const clIface = new ethers.Interface(CHAINLINK_ABI);
+
+let selectedToken = null;
+let sendMode = true;
+
+function getTokens() { return TOKENS[chainId] || ETH_ONLY; }
+
+function renderTokenRow() {
+  const tokens = getTokens();
+  if(!tokens.length) return;
+  if(!selectedToken || !tokens.find(t => t.symbol === selectedToken.symbol)) selectedToken = tokens[0];
+  const row = document.getElementById('tokenRow');
+  if(!row) return;
+  row.innerHTML = tokens.map(t =>
+    `<button class="token-pill${t.symbol === selectedToken.symbol ? ' active' : ''}" onclick="selectToken('${t.symbol}')">${t.icon || ''}${t.symbol}</button>`
+  ).join('') + `<button class="token-pill" onclick="promptCustomToken()">other</button>`;
+}
+
+window.selectToken = function(sym) {
+  const tokens = getTokens();
+  selectedToken = tokens.find(t => t.symbol === sym) || tokens[0];
+  renderTokenRow();
+  updateSendBalance();
+};
+
+window.promptCustomToken = async function() {
+  const addr = prompt('Token contract address:');
+  if(!addr || !ethers.isAddress(addr)) return;
+  try {
+    const token = new ethers.Contract(addr, ERC20_ABI, provider);
+    const [symbol, decimals] = await Promise.all([token.symbol(), token.decimals()]);
+    const t = { symbol, address: ethers.getAddress(addr), decimals: Number(decimals), icon:'' };
+    if(!TOKENS[chainId]) TOKENS[chainId] = [...ETH_ONLY];
+    if(!TOKENS[chainId].find(x => x.address.toLowerCase() === t.address.toLowerCase())) TOKENS[chainId].push(t);
+    selectedToken = t;
+    renderTokenRow();
+    updateSendBalance();
+  } catch(e) { alert('Could not read token: ' + (e.shortMessage || e.message)); }
+};
+
+async function updateSendBalance() {
+  const el = document.getElementById('sendBalance');
+  if(!el || !msAddress || !selectedToken) { if(el) el.textContent = ''; return; }
+  try {
+    const bal = selectedToken.address === ethers.ZeroAddress
+      ? await provider.getBalance(msAddress)
+      : await new ethers.Contract(selectedToken.address, ['function balanceOf(address) view returns (uint256)'], provider).balanceOf(msAddress);
+    el.textContent = `balance: ${ethers.formatUnits(bal, selectedToken.decimals)} ${selectedToken.symbol}`;
+  } catch(e) { el.textContent = ''; }
+}
+
+window.toggleTxMode = function() {
+  sendMode = !sendMode;
+  document.getElementById('txSendMode').classList.toggle('hidden', !sendMode);
+  document.getElementById('txCustomMode').classList.toggle('hidden', sendMode);
+  document.getElementById('txModeToggle').textContent = sendMode ? 'custom call' : 'send';
+};
+
+// Build send tx: reads form into target/value/data fields
+window.buildSendTx = async function() {
+  if(!sendMode || !selectedToken) return computeHash();
+  try {
+    showStatus('txStatus', 'Resolving...', true);
+    const call = await readCallFromForm();
+    document.getElementById('txTarget').value = call.target;
+    document.getElementById('txValue').value = ethers.formatEther(call.value);
+    document.getElementById('txData').value = call.data;
+    clearStatus('txStatus');
+  } catch(e) { return showStatus('txStatus', e.message, false); }
+  computeHash();
+};
+
+// --- Batch ---
+
+let batchCalls = []; // [{target, value, data, label}]
+
+function renderBatch() {
+  const sec = document.getElementById('batchSection');
+  const list = document.getElementById('batchList');
+  if(!batchCalls.length) { sec.classList.add('hidden'); return; }
+  sec.classList.remove('hidden');
+  document.getElementById('batchCount').textContent = `(${batchCalls.length} call${batchCalls.length>1?'s':''})`;
+  list.innerHTML = batchCalls.map((c, i) =>
+    `<li class="owner-item"><span>${_esc(c.label)}</span><button onclick="removeBatchCall(${i})">&#215;</button></li>`
+  ).join('');
+}
+
+window.removeBatchCall = function(i) { batchCalls.splice(i, 1); renderBatch(); };
+window.clearBatch = function() { batchCalls = []; renderBatch(); };
+
+// Read current form inputs into a {target, value, data, label} call
+async function readCallFromForm() {
+  if(sendMode) {
+    const raw = document.getElementById('sendTo').value.trim();
+    const amount = document.getElementById('sendAmount').value.trim();
+    if(!raw || !amount || isNaN(Number(amount))) throw new Error('Fill in amount and recipient');
+    const to = await resolveName(raw);
+    if(selectedToken.address === ethers.ZeroAddress) {
+      return { target: to, value: ethers.parseEther(amount).toString(), data: '0x', label: `${amount} ETH → ${to.slice(0,8)}...` };
+    } else {
+      const parsed = ethers.parseUnits(amount, selectedToken.decimals);
+      const calldata = erc20Iface.encodeFunctionData('transfer', [to, parsed]);
+      return { target: selectedToken.address, value: '0', data: calldata, label: `${amount} ${selectedToken.symbol} → ${to.slice(0,8)}...` };
+    }
+  } else {
+    const target = document.getElementById('txTarget').value.trim();
+    const value = document.getElementById('txValue').value.trim() || '0';
+    const data = document.getElementById('txData').value.trim() || '0x';
+    if(!ethers.isAddress(target)) throw new Error('Invalid target');
+    return { target, value: ethers.parseEther(value).toString(), data, label: `${target.slice(0,10)}... ${value} ETH` };
+  }
+}
+
+window.addToBatch = async function() {
+  clearStatus('txStatus');
+  try {
+    showStatus('txStatus', 'Resolving...', true);
+    const call = await readCallFromForm();
+    batchCalls.push(call);
+    renderBatch();
+    clearStatus('txStatus');
+    // Clear form for next entry
+    if(sendMode) { document.getElementById('sendAmount').value = ''; document.getElementById('sendTo').value = ''; }
+    else { document.getElementById('txTarget').value = ''; document.getElementById('txValue').value = ''; document.getElementById('txData').value = ''; }
+  } catch(e) { showStatus('txStatus', e.message, false); }
+};
+
+// Finalize: if batch has calls, encode as batch() self-call.
+// If single call or no batch, use the form directly.
+function finalizeTx() {
+  if(batchCalls.length > 1) {
+    const targets = batchCalls.map(c => c.target);
+    const values = batchCalls.map(c => c.value);
+    const datas = batchCalls.map(c => c.data);
+    document.getElementById('txTarget').value = msAddress;
+    document.getElementById('txValue').value = '0';
+    document.getElementById('txData').value = msIface.encodeFunctionData('batch', [targets, values, datas]);
+  } else if(batchCalls.length === 1) {
+    const c = batchCalls[0];
+    document.getElementById('txTarget').value = c.target;
+    document.getElementById('txValue').value = ethers.formatEther(c.value);
+    document.getElementById('txData').value = c.data;
+  }
+  // else: use form values as-is (direct entry)
+}
+
+// --- TRANSACT — HASH / SIGN / EXECUTE ---
+const EIP712_DOMAIN = { name:'Multisig', version:'1' };
+const EIP712_TYPES = { Execute: [
+  { name:'target', type:'address' }, { name:'value', type:'uint256' },
+  { name:'data', type:'bytes' }, { name:'nonce', type:'uint32' },
+]};
+
+function computeHash() {
+  try {
+    const target = document.getElementById('txTarget').value.trim();
+    const value = ethers.parseEther(document.getElementById('txValue').value.trim() || '0');
+    const data = document.getElementById('txData').value.trim() || '0x';
+    const nonce = parseInt(document.getElementById('txNonce').value) || 0;
+    const domain = { ...EIP712_DOMAIN, chainId, verifyingContract: msAddress };
+    const hash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, { target, value, data, nonce });
+    document.getElementById('txHash').textContent = hash;
+    document.getElementById('approveHash').value = hash;
+  } catch(e) {
+    document.getElementById('txHash').textContent = '';
+  }
+}
+
+window.signTx = async function() {
+  clearStatus('txStatus');
+  if(!signer) return showStatus('txStatus', 'Connect wallet first', false);
+  if(!msAddress) return showStatus('txStatus', 'Load a multisig first', false);
+
+  if(batchCalls.length) finalizeTx();
+  else if(sendMode) await buildSendTx();
+
+  try {
+    const target = document.getElementById('txTarget').value.trim();
+    if(!target) return showStatus('txStatus', 'Add a call first', false);
+    const value = ethers.parseEther(document.getElementById('txValue').value.trim() || '0');
+    const data = document.getElementById('txData').value.trim() || '0x';
+    const nonce = parseInt(document.getElementById('txNonce').value) || 0;
+
+    const domain = { ...EIP712_DOMAIN, chainId, verifyingContract: msAddress };
+    const msg = { target, value, data, nonce };
+    const sig = await signer.signTypedData(domain, EIP712_TYPES, msg);
+
+    const signerAddr = connectedAddress;
+    const existing = collectedSigs.findIndex(s => s.signer.toLowerCase() === signerAddr.toLowerCase());
+    if(existing >= 0) collectedSigs[existing] = {signer: signerAddr, sig};
+    else collectedSigs.push({signer: signerAddr, sig});
+
+    collectedSigs.sort((a,b) => a.signer.toLowerCase() < b.signer.toLowerCase() ? -1 : 1);
+    renderSigs();
+    computeHash();
+
+    // Persist to DB
+    if(walletDbId) {
+      const txHash = document.getElementById('txHash').textContent;
+      let dbTx = await dbGetTxByHash(txHash);
+      if(!dbTx) {
+        const thresh = parseInt(document.getElementById('msThreshold').textContent) || 1;
+        const txId = await dbProposeTx(walletDbId, nonce, target.toString(), value.toString(), data, txHash, thresh, connectedAddress);
+        if(txId) dbTx = { id: txId };
+      }
+      if(dbTx) await dbAddSig(dbTx.id, signerAddr, sig);
+      loadPending();
+    }
+
+    showStatus('txStatus', `Signed by ${signerAddr.slice(0,8)}...`, true);
+  } catch(e) {
+    console.error(e);
+    showStatus('txStatus', e.shortMessage || e.message, false);
+  }
+};
+
+window.addSig = function() {
+  const input = document.getElementById('pasteSig');
+  const sig = input.value.trim();
+  if(!sig || sig.length !== 132) return alert('Signature must be 132 hex chars (0x + 130)');
+
+  try {
+    const r = sig.slice(0, 66);
+    const v = parseInt('0x' + sig.slice(130, 132));
+
+    if(v === 0) {
+      const signerAddr = ethers.getAddress('0x' + r.slice(26));
+      const existing = collectedSigs.findIndex(s => s.signer.toLowerCase() === signerAddr.toLowerCase());
+      if(existing >= 0) collectedSigs[existing] = {signer: signerAddr, sig};
+      else collectedSigs.push({signer: signerAddr, sig});
+    } else {
+      collectedSigs.push({signer: '(verify order)', sig});
+    }
+
+    collectedSigs.sort((a,b) => {
+      if(a.signer.startsWith('(')) return 1;
+      if(b.signer.startsWith('(')) return -1;
+      return a.signer.toLowerCase() < b.signer.toLowerCase() ? -1 : 1;
+    });
+    renderSigs();
+    input.value = '';
+  } catch(e) { alert('Invalid signature'); }
+};
+
+function renderSigs() {
+  const list = document.getElementById('sigList');
+  list.innerHTML = collectedSigs.map((s,i) =>
+    `<div class="sig-item"><div><span class="sig-signer">${s.signer}</span><br>${s.sig.slice(0,22)}...${s.sig.slice(-8)}</div><button class="add-btn" onclick="removeSig(${i})">&#215;</button></div>`
+  ).join('') || '<span class="dim small">no signatures collected</span>';
+  document.getElementById('sigCount').textContent = `(${collectedSigs.length})`;
+}
+
+window.removeSig = function(i) { collectedSigs.splice(i,1); renderSigs(); };
+
+// Build a v=0 sender-bypass signature: address packed into r, s=0, v=0
+function senderSig(addr) {
+  return '0x' + addr.slice(2).toLowerCase().padStart(64, '0') + '0'.repeat(64) + '00';
+}
+
+window.executeTx = async function() {
+  clearStatus('txStatus');
+  if(!signer) return showStatus('txStatus', 'Connect wallet first', false);
+  if(!msAddress) return showStatus('txStatus', 'Load a multisig first', false);
+
+  if(batchCalls.length) finalizeTx();
+  else if(sendMode) await buildSendTx();
+
+  try {
+    const target = document.getElementById('txTarget').value.trim();
+    if(!target) return showStatus('txStatus', 'Add a call first', false);
+    const value = ethers.parseEther(document.getElementById('txValue').value.trim() || '0');
+    const data = document.getElementById('txData').value.trim() || '0x';
+
+    // Auto-inject sender-bypass sig if caller is owner and hasn't signed
+    const callerIsOwner = loadedOwners.some(o => o.toLowerCase() === connectedAddress.toLowerCase());
+    const callerHasSigned = collectedSigs.some(s => s.signer.toLowerCase() === connectedAddress.toLowerCase());
+    if(callerIsOwner && !callerHasSigned) {
+      collectedSigs.push({ signer: connectedAddress, sig: senderSig(connectedAddress) });
+      collectedSigs.sort((a,b) => a.signer.toLowerCase() < b.signer.toLowerCase() ? -1 : 1);
+      renderSigs();
+    }
+
+    let sigs = '0x';
+    for(const s of collectedSigs) sigs += s.sig.slice(2);
+
+    const ms = new ethers.Contract(msAddress, MULTISIG_ABI, signer);
+
+    // Route through TimelockExecutor when conditions are met
+    const sigCount = collectedSigs.length;
+    const isCancelCall = isTimelockExecutor
+      && target.toLowerCase() === msAddress.toLowerCase()
+      && data.length >= 10 && data.slice(0, 10) === msIface.getFunction('cancelQueued').selector;
+    const canCancel = isCancelCall && sigCount >= Number(await ms.threshold());
+    const canForward = isTimelockExecutor && tlForwardEnabled && sigCount === loadedOwners.length && !isCancelCall;
+
+    let tx;
+    if(canCancel || canForward) {
+      const label = canCancel ? 'Cancelling via executor (immediate)...' : 'Forwarding via executor (immediate)...';
+      showStatus('txStatus', label, true);
+      const executorAddr = await ms.executor();
+      const tlContract = new ethers.Contract(executorAddr, TIMELOCK_EXECUTOR_ABI, signer);
+      // For cancel, trim to exactly threshold sigs (module requires exact match)
+      let forwardSigs = sigs;
+      if(canCancel) {
+        const thresh = Number(await ms.threshold());
+        const trimmed = collectedSigs.slice(0, thresh);
+        forwardSigs = '0x';
+        for(const s of trimmed) forwardSigs += s.sig.slice(2);
+      }
+      tx = await tlContract.forward(msAddress, target, value, data, forwardSigs);
+    } else {
+      showStatus('txStatus', 'Sending transaction...', true);
+      tx = await ms.execute(target, value, data, sigs, {value: 0});
+    }
+    showStatus('txStatus', `Tx: ${explorerLink(tx.hash, 'tx')}<br>Waiting...`, true);
+    const receipt = await tx.wait();
+
+    const dbTx = await dbGetTxByHash(document.getElementById('txHash').textContent);
+    let result = 'Confirmed';
+    for(const log of receipt.logs) {
+      try {
+        let parsed = msIface.parseLog(log);
+        if(!parsed) parsed = tlIface.parseLog(log);
+        if(parsed?.name === 'ExecutionSuccess') {
+          result = `Executed (nonce ${parsed.args[1]})`;
+          if(dbTx) await dbMarkExecuted(dbTx.id, Number(receipt.blockNumber), receipt.hash);
+        }
+        if(parsed?.name === 'Queued') {
+          const eta = Number(parsed.args[2]);
+          result = `Queued &#8212; ETA: ${new Date(eta * 1000).toLocaleString()}`;
+          if(dbTx) await dbMarkQueued(dbTx.id, eta, Number(receipt.blockNumber));
+        }
+        if(parsed?.name === 'Forwarded') {
+          result = `Forwarded (immediate)`;
+          if(dbTx) await dbMarkExecuted(dbTx.id, Number(receipt.blockNumber), receipt.hash);
+        }
+      } catch(_){}
+    }
+
+    showStatus('txStatus', `${result}<br>${explorerLink(receipt.hash, 'tx')}`, true);
+    if(walletDbId) dbSyncWalletState();
+    loadMultisig();
+  } catch(e) {
+    console.error(e);
+    showStatus('txStatus', e.shortMessage || e.message, false);
+  }
+};
+
+// --- APPROVE ---
+window.approveTx = async function(ok) {
+  clearStatus('approveStatus');
+  if(!signer) return showStatus('approveStatus', 'Connect wallet first', false);
+  if(!msAddress) return showStatus('approveStatus', 'Load a multisig first', false);
+
+  const hash = document.getElementById('approveHash').value.trim();
+  if(!hash || hash.length !== 66) return showStatus('approveStatus', 'Invalid hash', false);
+
+  try {
+    const ms = new ethers.Contract(msAddress, MULTISIG_ABI, signer);
+    showStatus('approveStatus', ok ? 'Approving...' : 'Revoking...', true);
+    const tx = await ms.approve(hash, ok);
+    showStatus('approveStatus', `Tx: ${explorerLink(tx.hash, 'tx')}<br>Waiting...`, true);
+    await tx.wait();
+    showStatus('approveStatus', ok ? 'Approved' : 'Revoked', true);
+  } catch(e) {
+    console.error(e);
+    showStatus('approveStatus', e.shortMessage || e.message, false);
+  }
+};
+
+window.checkApproval = async function() {
+  if(!msContract) return;
+  const hash = document.getElementById('approveHash').value.trim();
+  const addr = document.getElementById('approveCheckAddr').value.trim();
+  if(!hash || !ethers.isAddress(addr)) return;
+  try {
+    const ok = await msContract.approved(addr, hash);
+    document.getElementById('approvalResult').textContent = ok ? 'approved' : 'not approved';
+    document.getElementById('approvalResult').style.color = ok ? 'var(--success)' : 'var(--error)';
+  } catch(e) {
+    document.getElementById('approvalResult').textContent = 'error';
+  }
+};
+
+// --- QUEUE ---
+window.checkQueued = async function() {
+  if(!msContract) return;
+  const hash = document.getElementById('queueHash').value.trim();
+  if(!hash) return;
+  try {
+    const eta = await msContract.queued(hash);
+    if(eta == 0n) {
+      document.getElementById('queueEta').textContent = 'not queued';
+    } else {
+      const date = new Date(Number(eta) * 1000);
+      const ready = Date.now() >= Number(eta) * 1000;
+      document.getElementById('queueEta').textContent = `ETA: ${date.toLocaleString()} ${ready ? '(ready)' : '(pending)'}`;
+      document.getElementById('queueEta').style.color = ready ? 'var(--success)' : 'var(--fg-muted)';
+    }
+  } catch(e) {
+    document.getElementById('queueEta').textContent = 'error';
+  }
+};
+
+window.executeQueued = async function() {
+  clearStatus('queueStatus');
+  if(!signer) return showStatus('queueStatus', 'Connect wallet first', false);
+  if(!msAddress) return showStatus('queueStatus', 'Load a multisig first', false);
+
+  try {
+    const target = document.getElementById('qTarget').value.trim();
+    const value = ethers.parseEther(document.getElementById('qValue').value.trim() || '0');
+    const data = document.getElementById('qData').value.trim() || '0x';
+    const nonce = parseInt(document.getElementById('qNonce').value) || 0;
+
+    const ms = new ethers.Contract(msAddress, MULTISIG_ABI, signer);
+    showStatus('queueStatus', 'Executing queued tx...', true);
+    const tx = await ms.executeQueued(target, value, data, nonce);
+    showStatus('queueStatus', `Tx: ${explorerLink(tx.hash, 'tx')}<br>Waiting...`, true);
+    await tx.wait();
+    showStatus('queueStatus', `Executed: ${explorerLink(tx.hash, 'tx')}`, true);
+    loadMultisig();
+  } catch(e) {
+    console.error(e);
+    showStatus('queueStatus', e.shortMessage || e.message, false);
+  }
+};
+
+window.cancelQueued = async function() {
+  clearStatus('queueStatus');
+  if(!signer) return showStatus('queueStatus', 'Connect wallet first', false);
+  if(!msAddress) return showStatus('queueStatus', 'Load a multisig first', false);
+
+  const hash = document.getElementById('cancelHash').value.trim();
+  if(!hash) return showStatus('queueStatus', 'Enter tx hash', false);
+
+  if(isTimelockExecutor) {
+    // Route cancel through TimelockExecutor — needs threshold sigs
+    // Build the cancel calldata and pre-fill the transact form
+    const cancelData = msIface.encodeFunctionData('cancelQueued', [hash]);
+    if(sendMode) toggleTxMode();
+    document.getElementById('txTarget').value = msAddress;
+    document.getElementById('txValue').value = '0';
+    document.getElementById('txData').value = cancelData;
+    collectedSigs = [];
+    renderSigs();
+    computeHash();
+    showSubPanel('sub-transact');
+    showStatus('queueStatus', 'Cancel requires threshold sigs — sign & execute in transact tab. Will route through executor for immediate cancel.', true);
+    return;
+  }
+
+  // Fallback: build self-call via execute (for non-TimelockExecutor executors)
+  try {
+    const cancelData = msIface.encodeFunctionData('cancelQueued', [hash]);
+    if(sendMode) toggleTxMode();
+    document.getElementById('txTarget').value = msAddress;
+    document.getElementById('txValue').value = '0';
+    document.getElementById('txData').value = cancelData;
+    collectedSigs = [];
+    renderSigs();
+    computeHash();
+    showSubPanel('sub-transact');
+    showStatus('queueStatus', 'Cancel is a self-call — sign & execute in transact tab (will be timelocked).', true);
+  } catch(e) {
+    console.error(e);
+    showStatus('queueStatus', e.shortMessage || e.message, false);
+  }
+};
+
+// --- SETTINGS — BUILD SELF-CALL TX ---
+window.buildSettingsTx = async function(action) {
+  clearStatus('settingsStatus');
+  if(!msAddress) return showStatus('settingsStatus', 'Load a multisig first', false);
+
+  let data;
+  try {
+    switch(action) {
+      case 'addOwner': {
+        const raw = document.getElementById('setAddOwner').value.trim();
+        if(!raw) return showStatus('settingsStatus', 'Enter an address or name', false);
+        showStatus('settingsStatus', 'Resolving...', true);
+        const addr = await resolveName(raw);
+        data = msIface.encodeFunctionData('addOwner', [addr]);
+        break;
+      }
+      case 'removeOwner': {
+        const target = document.getElementById('setRemoveOwner').value;
+        if(!target) return showStatus('settingsStatus', 'Select an owner', false);
+        const idx = loadedOwners.findIndex(o => o.toLowerCase() === target.toLowerCase());
+        if(idx < 0) return showStatus('settingsStatus', 'Not an owner', false);
+        const prevOwner = idx === 0 ? SENTINEL : loadedOwners[idx - 1];
+        data = msIface.encodeFunctionData('removeOwner', [prevOwner, target]);
+        break;
+      }
+      case 'setThreshold': {
+        const val = parseInt(document.getElementById('setThreshold').value);
+        if(!val || val < 1 || val > loadedOwners.length) return showStatus('settingsStatus', `Threshold must be 1-${loadedOwners.length}`, false);
+        data = msIface.encodeFunctionData('setThreshold', [val]);
+        break;
+      }
+      case 'setDelay': {
+        const val = parseInt(document.getElementById('setDelay').value);
+        if(isNaN(val) || val < 0) return showStatus('settingsStatus', 'Invalid delay', false);
+        data = msIface.encodeFunctionData('setDelay', [val * 60]);
+        break;
+      }
+      case 'addExecutor': {
+        const addr = document.getElementById('setExecutor').value.trim();
+        if(!ethers.isAddress(addr)) return showStatus('settingsStatus', 'Invalid address', false);
+        data = msIface.encodeFunctionData('setExecutor', [ethers.getAddress(addr)]);
+        break;
+      }
+      case 'removeExecutor': {
+        data = msIface.encodeFunctionData('setExecutor', [ethers.ZeroAddress]);
+        break;
+      }
+      default: return;
+    }
+
+    // Switch to custom call mode and fill
+    if(sendMode) toggleTxMode();
+    document.getElementById('txTarget').value = msAddress;
+    document.getElementById('txValue').value = '0';
+    document.getElementById('txData').value = data;
+    switchSubTab('transact');
+    computeHash();
+    showStatus('settingsStatus', `Calldata built &#8212; sign & execute in transact tab`, true);
+  } catch(e) {
+    console.error(e);
+    showStatus('settingsStatus', e.shortMessage || e.message, false);
+  }
+};
+
+// --- Supabase helpers ---
+
+let walletDbId = null; // UUID of loaded wallet in DB
+
+async function dbRegisterWallet(addr, deployer, salt, ownerList, thresh, del, exec, block, txHash) {
+  const { data, error } = await sb.rpc('register_wallet', {
+    p_chain_id: chainId, p_address: addr, p_deployer: deployer,
+    p_salt: salt.toString(), p_owners: ownerList, p_threshold: thresh,
+    p_delay: del, p_executor: exec, p_block: block, p_tx: txHash
+  });
+  if(error) console.error('DB register:', error);
+  return data;
+}
+
+async function dbFindWallet(addr) {
+  const { data } = await sb.from('wallets')
+    .select('id, threshold, delay, nonce, executor, owner_count')
+    .eq('chain_id', chainId).eq('address', addr).maybeSingle();
+  return data;
+}
+
+async function dbMyWallets(ownerAddr) {
+  const { data } = await sb.from('my_wallets')
+    .select('id, chain_id, address, threshold, owner_count')
+    .eq('owner', ownerAddr).eq('chain_id', chainId);
+  return data || [];
+}
+
+async function dbProposeTx(wId, nonce, target, value, callData, txHash, thresh, proposedBy, desc) {
+  const { data, error } = await sb.rpc('propose_tx', {
+    p_wallet_id: wId, p_chain_id: chainId, p_nonce: nonce,
+    p_target: target, p_value: value.toString(), p_call_data: callData,
+    p_tx_hash: txHash, p_threshold: thresh, p_proposed_by: proposedBy,
+    p_description: desc
+  });
+  if(error) console.error('DB propose:', error);
+  return data;
+}
+
+async function dbAddSig(txId, signerAddr, signature, sigType) {
+  const { data, error } = await sb.rpc('add_signature', {
+    p_tx_id: txId, p_signer: signerAddr, p_signature: signature,
+    p_sig_type: sigType || 'ecdsa'
+  });
+  if(error) console.error('DB add sig:', error);
+  return data; // returns count
+}
+
+async function dbGetPending(wId) {
+  const { data } = await sb.from('tx_summary')
+    .select('*')
+    .eq('wallet_id', wId)
+    .in('status', ['proposed', 'executing', 'queued'])
+    .order('nonce', { ascending: true });
+  return data || [];
+}
+
+async function dbGetTxByHash(txHash) {
+  if(!txHash || txHash === '—') return null;
+  const { data } = await sb.from('transactions')
+    .select('id, wallet_id, nonce, target, value, call_data, threshold, status')
+    .eq('chain_id', chainId).eq('tx_hash', txHash).maybeSingle();
+  return data;
+}
+
+async function dbGetSigs(txId) {
+  const { data } = await sb.from('signatures')
+    .select('signer, signature, sig_type')
+    .eq('tx_id', txId)
+    .order('signer', { ascending: true });
+  return data || [];
+}
+
+async function dbMarkExecuted(txId, block, execTx) {
+  await sb.rpc('mark_executed', { p_tx_id: txId, p_block: block, p_execution_tx: execTx });
+}
+
+async function dbMarkQueued(txId, eta, block) {
+  await sb.rpc('mark_queued', { p_tx_id: txId, p_eta: eta, p_block: block });
+}
+
+async function dbCancelTx(txId, cancelledBy) {
+  await sb.rpc('cancel_tx', { p_tx_id: txId, p_cancelled_by: cancelledBy });
+}
+
+async function dbSyncWalletState() {
+  if(!walletDbId || !msAddress) return;
+  try {
+    const s = await multicallLoad(msAddress);
+    await sb.from('wallets').update({
+      threshold: Number(s.threshold),
+      owner_count: Number(s.ownerCount),
+      delay: Number(s.delay),
+      executor: s.executor,
+      nonce: Number(s.nonce),
+    }).eq('id', walletDbId);
+    // Sync owners: mark removed, add new
+    const { data: dbOwners } = await sb.from('owners').select('address').eq('wallet_id', walletDbId).eq('is_current', true);
+    const dbSet = new Set((dbOwners||[]).map(o => o.address.toLowerCase()));
+    const chainSet = new Set(s.owners.map(o => o.toLowerCase()));
+    for(const o of dbOwners||[]) {
+      if(!chainSet.has(o.address.toLowerCase())) {
+        await sb.from('owners').update({ is_current: false, removed_at: new Date().toISOString() })
+          .eq('wallet_id', walletDbId).eq('address', o.address).eq('is_current', true);
+      }
+    }
+    for(let i = 0; i < s.owners.length; i++) {
+      if(!dbSet.has(s.owners[i].toLowerCase())) {
+        await sb.from('owners').insert({ wallet_id: walletDbId, address: s.owners[i], position: i, is_current: true });
+      }
+    }
+  } catch(e) { console.error('DB sync:', e); }
+}
+
+// --- Multicall3 batched reads ---
+
+async function multicallLoad(addr) {
+  const ms = new ethers.Contract(addr, MULTISIG_ABI, provider);
+
+  // Anvil / local chains won't have Multicall3 — use direct calls
+  if(chainId === 31337) {
+    const [threshold, delay, nonce, executor, ownerCount, owners, balance] = await Promise.all([
+      ms.threshold(), ms.delay(), ms.nonce(), ms.executor(), ms.ownerCount(), ms.getOwners(), provider.getBalance(addr)
+    ]);
+    return { threshold, delay, nonce, executor, ownerCount, owners, balance };
+  }
+
+  const mc = new ethers.Contract(MC3, MC3_ABI, provider);
+  const encode = fn => ({ target: addr, allowFailure: false, callData: msIface.encodeFunctionData(fn) });
+  const fns = ['threshold','delay','nonce','executor','ownerCount','getOwners'];
+  const [results, balance] = await Promise.all([mc.aggregate3(fns.map(encode)), provider.getBalance(addr)]);
+  const d = (fn, i) => msIface.decodeFunctionResult(fn, results[i].returnData)[0];
+  return { threshold:d('threshold',0), delay:d('delay',1), nonce:d('nonce',2), executor:d('executor',3), ownerCount:d('ownerCount',4), owners:d('getOwners',5), balance };
+}
+
+// --- Token balances (batched via Multicall3) ---
+
+async function loadTokenBalances(walletAddr, ethBalance) {
+  const el = document.getElementById('tokenBalances');
+  if(!el) return;
+  const allTokens = TOKENS[chainId] || ETH_ONLY;
+  const erc20Tokens = allTokens.filter(t => t.address !== ethers.ZeroAddress);
+  if(!erc20Tokens.length) { el.innerHTML = ''; return; }
+
+  try {
+    // Build batched calls: ERC20 balances + Chainlink price feeds
+    const feeds = CHAINLINK_FEEDS[chainId] || {};
+    const feedSymbols = Object.keys(feeds);
+    const latestAnswerData = clIface.encodeFunctionData('latestAnswer');
+
+    let balances, prices = {};
+
+    if(chainId === 31337) {
+      balances = await Promise.all(erc20Tokens.map(async t => {
+        try {
+          const c = new ethers.Contract(t.address, ERC20_ABI, provider);
+          return { success: true, bal: await c.balanceOf(walletAddr) };
+        } catch(_) { return { success: false, bal: 0n }; }
+      }));
+    } else {
+      const mc = new ethers.Contract(MC3, MC3_ABI, provider);
+      const balCalls = erc20Tokens.map(t => ({
+        target: t.address, allowFailure: true,
+        callData: erc20Iface.encodeFunctionData('balanceOf', [walletAddr])
+      }));
+      const priceCalls = feedSymbols.map(sym => ({
+        target: feeds[sym], allowFailure: true,
+        callData: latestAnswerData
+      }));
+      const results = await mc.aggregate3([...balCalls, ...priceCalls]);
+
+      balances = results.slice(0, balCalls.length).map(r => ({
+        success: r.success,
+        bal: r.success ? erc20Iface.decodeFunctionResult('balanceOf', r.returnData)[0] : 0n
+      }));
+      results.slice(balCalls.length).forEach((r, i) => {
+        if(r.success) {
+          const answer = clIface.decodeFunctionResult('latestAnswer', r.returnData)[0];
+          prices[feedSymbols[i]] = Number(answer) / 1e8; // Chainlink USD feeds use 8 decimals
+        }
+      });
+    }
+
+    // Use passed-in ETH balance (already fetched by multicallLoad), fallback to direct call
+    if(ethBalance == null) ethBalance = await provider.getBalance(walletAddr);
+    const ethPrice = prices['ETH'] || 0;
+    const stableSymbols = new Set(['USDC', 'USDT', 'DAI']);
+    let totalUsd = 0;
+
+    // ETH row
+    if(ethBalance > 0n) {
+      const ethAmount = Number(ethers.formatEther(ethBalance));
+      const ethUsd = ethPrice > 0 ? ethAmount * ethPrice : 0;
+      totalUsd += ethUsd;
+    }
+
+    const rows = erc20Tokens.map((t, i) => {
+      if(!balances[i].success || balances[i].bal === 0n) return '';
+      const formatted = ethers.formatUnits(balances[i].bal, t.decimals);
+      const amount = Number(formatted);
+      const display = t.decimals <= 8 ? amount.toFixed(2) : amount.toFixed(4).replace(/\.?0+$/, '');
+
+      let usdStr = '';
+      if(stableSymbols.has(t.symbol)) {
+        totalUsd += amount;
+        usdStr = ` <span class="dim small">$${amount.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</span>`;
+      } else if(prices[t.symbol]) {
+        const usd = amount * prices[t.symbol];
+        totalUsd += usd;
+        usdStr = ` <span class="dim small">$${usd.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</span>`;
+      }
+      return `<div class="info-row"><span class="info-label">${t.icon || ''}${t.symbol}</span><span class="info-value">${display}${usdStr}</span></div>`;
+    }).filter(Boolean);
+
+    // Update ETH balance display with USD if available
+    const ethEl = document.getElementById('msBalance');
+    if(ethEl && ethBalance > 0n) {
+      const ethAmount = Number(ethers.formatEther(ethBalance));
+      const ethUsd = ethPrice > 0 ? ` <span class="dim small">($${(ethAmount * ethPrice).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})})</span>` : '';
+      ethEl.innerHTML = ethers.formatEther(ethBalance).slice(0, 10) + ` ETH${ethUsd}`;
+    }
+
+    // Total USD
+    if(totalUsd > 0) {
+      rows.unshift(`<div class="info-row"><span class="info-label" style="font-weight:600">total</span><span class="info-value" style="font-weight:600">$${totalUsd.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</span></div>`);
+    }
+
+    el.innerHTML = rows.join('');
+  } catch(e) {
+    console.error('Token balances:', e);
+    el.innerHTML = '';
+  }
+}
+
+// --- My wallets UI ---
+
+async function loadMyWallets() {
+  if(!connectedAddress) return;
+  const sec = document.getElementById('myWalletsSection');
+  const list = document.getElementById('myWalletsList');
+  const label = document.getElementById('addrInputLabel');
+  try {
+    const wallets = await dbMyWallets(connectedAddress);
+    if(!wallets.length) {
+      sec.classList.add('hidden');
+      label.textContent = 'multisig address';
+      return;
+    }
+    sec.classList.remove('hidden');
+    label.textContent = 'or load by address';
+    list.innerHTML = wallets.map(w =>
+      `<li class="wallet-item" onclick="document.getElementById('msAddr').value='${w.address}';loadMultisig();">
+        <span>${w.address.slice(0,8)}...${w.address.slice(-6)}</span>
+        <span class="dim">${w.threshold}/${w.owner_count}</span>
+      </li>`
+    ).join('');
+  } catch(e) {
+    console.error('loadMyWallets:', e);
+    sec.classList.add('hidden');
+    label.textContent = 'multisig address';
+  }
+}
+
+// --- Pending proposals UI ---
+
+function formatEta(eta) {
+  if(!eta) return '';
+  const diff = eta * 1000 - Date.now();
+  if(diff <= 0) return 'ready';
+  const m = Math.ceil(diff / 60000);
+  if(m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+async function loadPending() {
+  if(!walletDbId) return;
+  const txs = await dbGetPending(walletDbId);
+  const sec = document.getElementById('pendingSection');
+  const list = document.getElementById('pendingList');
+  if(!txs.length) { sec.classList.add('hidden'); return; }
+  sec.classList.remove('hidden');
+
+  // Batch-fetch signers for all pending txs
+  const txIds = txs.map(t => t.id);
+  const { data: allSigs } = await sb.from('signatures').select('tx_id, signer').in('tx_id', txIds);
+  const sigMap = {};
+  for(const s of (allSigs || [])) { (sigMap[s.tx_id] = sigMap[s.tx_id] || []).push(s.signer); }
+
+  const youNeedToSign = connectedAddress ? connectedAddress.toLowerCase() : null;
+
+  list.innerHTML = txs.map(t => {
+    const signers = sigMap[t.id] || [];
+    const sigLabel = `${signers.length}/${t.sigs_needed}`;
+    const youSigned = youNeedToSign && signers.some(s => s.toLowerCase() === youNeedToSign);
+
+    let badge = '';
+    if(t.status === 'queued' && t.queue_ready) badge = '<span style="color:var(--success)">execute now</span>';
+    else if(t.status === 'queued') badge = `<span>locked ${formatEta(t.eta)}</span>`;
+    else if(signers.length >= (t.sigs_needed || 1)) badge = '<span style="color:var(--success)">ready</span>';
+    else if(youNeedToSign && !youSigned) badge = `<span>${sigLabel} &middot; sign</span>`;
+    else badge = `<span>${sigLabel} sigs</span>`;
+
+    const signerList = signers.map(s => s.slice(0,6)+'..').join(', ');
+
+    return `<li class="pending-item" onclick="loadProposal('${_esc(t.id)}')">
+      <div class="pending-row">
+        <span>#${t.nonce} ${t.target ? t.target.slice(0,10)+'...' : ''}</span>
+        <span class="pending-sigs">${badge}</span>
+      </div>
+      ${signerList ? `<span class="pending-desc">signed: ${_esc(signerList)}</span>` : ''}
+      ${t.description ? `<span class="pending-desc">${_esc(t.description)}</span>` : ''}
+    </li>`;
+  }).join('');
+}
+
+window.loadProposal = async function(txId) {
+  const { data: tx } = await sb.from('transactions')
+    .select('*').eq('id', txId).single();
+  if(!tx) return;
+
+  if(tx.status === 'queued') {
+    // Queued tx — fill the queue execute form and switch to queue tab
+    document.getElementById('qTarget').value = tx.target;
+    document.getElementById('qValue').value = ethers.formatEther(BigInt(tx.value));
+    document.getElementById('qData').value = tx.call_data;
+    document.getElementById('qNonce').value = tx.nonce;
+    document.getElementById('queueHash').value = tx.tx_hash;
+    checkQueued();
+    switchSubTab('queue');
+  } else {
+    // Proposed — fill transact form
+    if(sendMode) toggleTxMode();
+    document.getElementById('txTarget').value = tx.target;
+    document.getElementById('txValue').value = ethers.formatEther(BigInt(tx.value));
+    document.getElementById('txData').value = tx.call_data;
+    document.getElementById('txNonce').value = tx.nonce;
+    document.getElementById('txHash').textContent = tx.tx_hash;
+    document.getElementById('approveHash').value = tx.tx_hash;
+    const sigs = await dbGetSigs(txId);
+    collectedSigs = sigs.map(s => ({ signer: s.signer, sig: s.signature }));
+    renderSigs();
+    switchSubTab('transact');
+  }
+};
+
+// --- INIT ---
+(function init() {
+  if(!CHAINS[chainId]) chainId = 1;
+  provider = makeProvider(chainId);
+  updateNetButtons();
+  walletInit({
+    appName: 'Multisig',
+    chainId: chainId,
+    chainHex: CHAINS[chainId].hex,
+    rpc: CHAINS[chainId].rpcs[0],
+    addChainParams: ADD_CHAIN_PARAMS[chainId] || null,
+    onConnect: [onWalletConnect],
+    onDisconnect: [onWalletDisconnect],
+  });
+  renderOwners();
+  renderSigs();
+
+  document.getElementById('threshold').addEventListener('input', function() {
+    const max = owners.length || 1;
+    if(parseInt(this.value) > max) this.value = max;
+    if(parseInt(this.value) < 1) this.value = 1;
+  });
+
+  // Deep link: #chainId/0xAddress
+  const hash = location.hash.slice(1);
+  const match = hash.match(/^(\d+)\/(0x[0-9a-fA-F]{40})$/);
+  if(match) {
+    const linkChain = parseInt(match[1]);
+    if(CHAINS[linkChain]) {
+      chainId = linkChain;
+      localStorage.setItem('ms_chain', String(chainId));
+      provider = makeProvider(chainId);
+      updateNetButtons();
+      document.getElementById('msAddr').value = match[2];
+      switchTab('manage');
+      setTimeout(() => loadMultisig(), 500);
+    }
+  } else {
+    const savedMs = localStorage.getItem('ms_addr_' + chainId);
+    if(savedMs) document.getElementById('msAddr').value = savedMs;
+  }
+
+  document.getElementById('msAddr').addEventListener('change', function() {
+    if(this.value.trim()) localStorage.setItem('ms_addr_' + chainId, this.value.trim());
+  });
+})();
+</script>
+</body>
+</html>

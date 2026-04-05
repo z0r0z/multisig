@@ -1829,7 +1829,11 @@ async function mineVanitySalt(factory, impl, caller) {
   for(let n = 0n; ; n++) {
     const salt = '0x' + (base | n).toString(16).padStart(64, '0');
     const addr = ethers.getCreate2Address(factory, salt, hash);
-    if(addr.slice(2, 4) === '00') return { salt: base | n, address: addr, nonce: n };
+    if(addr.slice(2, 4) === '00') {
+      const code = await provider.getCode(addr);
+      if(code !== '0x') continue; // already deployed on this chain
+      return { salt: base | n, address: addr, nonce: n };
+    }
     if(n > 0n && n % 5000n === 0n) await new Promise(r => setTimeout(r, 0));
   }
 }
@@ -1870,10 +1874,26 @@ async function prodDeploy() {
   const executor = del > 0 ? TIMELOCK_EXECUTOR : ethers.ZeroAddress;
   const wantForward = c.fastPath && del > 0;
 
-  // Ensure wallet is on the right chain (skipLoad avoids race with loadAllVaults)
+  // Ensure wallet is on the right chain
   const targetChainId = net.id;
   if(targetChainId !== S.chainId) {
     await switchChain(targetChainId, true);
+  }
+  // Verify wallet actually switched
+  if(window._connectedWalletProvider) {
+    try {
+      const wc = await window._connectedWalletProvider.request({method:'eth_chainId'});
+      const walletChain = parseInt(wc, 16);
+      if(walletChain !== targetChainId) {
+        // Revert app state to wallet's actual chain
+        S.chainId = walletChain;
+        localStorage.setItem('ms_chain', String(walletChain));
+        provider = makeProvider(walletChain);
+        render();
+        flash('SWITCH TO ' + net.name + ' TO DEPLOY');
+        return;
+      }
+    } catch(_) {}
   }
 
   try {

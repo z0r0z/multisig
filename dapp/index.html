@@ -900,7 +900,7 @@ function renderCreate(mob){
       <label class="lbl">OWNERS</label>
       ${c.owners.map((o,i)=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:2px">
         <span style="font-size:10px;font-weight:700;color:var(--d);width:20px">${String(i+1).padStart(2,"0")}</span>
-        <input class="inp" style="margin-bottom:8px;flex:2" placeholder="0x... or name.eth / name.wei" value="${esc(o.addr)}" oninput="S.cf.owners[${i}].addr=this.value">
+        <input class="inp" style="margin-bottom:8px;flex:2" placeholder="0x... or name.eth / name.wei" value="${esc(o.addr)}" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc)S.cf.threshold=String(fc);render()">
         <input class="inp" style="margin-bottom:8px;flex:1;font-size:11px;letter-spacing:1px" placeholder="LABEL" value="${esc(o.label)}" oninput="S.cf.owners[${i}].label=this.value">
         ${c.owners.length>1?`<button class="x-btn red" onclick="S.cf.owners.splice(${i},1);S.cf.threshold=String(Math.min(+S.cf.threshold||1,S.cf.owners.length));render()">&#10005;</button>`:""}
       </div>`).join("")}
@@ -910,7 +910,7 @@ function renderCreate(mob){
         <div>
           <label class="lbl">THRESHOLD</label>
           <select class="inp" style="cursor:pointer;appearance:none" onchange="S.cf.threshold=this.value;render()">
-            ${c.owners.map((_,i)=>`<option value="${i+1}"${+c.threshold===i+1?" selected":""}>${i+1} of ${c.owners.length}</option>`).join("")}
+            ${(()=>{const filled=c.owners.filter(o=>o.addr.trim()).length||1;return Array.from({length:filled},(_,i)=>`<option value="${i+1}"${+c.threshold===i+1?" selected":""}>${i+1} of ${filled}</option>`).join("")})()}
           </select>
         </div>
         <div>

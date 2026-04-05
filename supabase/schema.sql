@@ -475,12 +475,15 @@ BEGIN
     END LOOP;
   END IF;
 
-  -- Add new owners
+  -- Upsert owners with correct positions
   FOR i IN 1..array_length(p_owners, 1) LOOP
-    IF NOT EXISTS (
+    IF EXISTS (
       SELECT 1 FROM owners
       WHERE wallet_id = p_wallet_id AND lower(address) = lower(p_owners[i]) AND is_current = true
     ) THEN
+      UPDATE owners SET position = i - 1
+      WHERE wallet_id = p_wallet_id AND lower(address) = lower(p_owners[i]) AND is_current = true;
+    ELSE
       INSERT INTO owners (wallet_id, address, position, is_current)
       VALUES (p_wallet_id, p_owners[i], i - 1, true);
     END IF;

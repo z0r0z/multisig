@@ -1734,12 +1734,23 @@ async function reloadVault(vi) {
     // Preserve existing labels
     const oldLabels = {};
     v.owners.forEach(o => { if(o.label) oldLabels[o.addr.toLowerCase()] = o.label; });
+    // Apply pending label from addOwner
+    if(v._pendingLabel && v._pendingLabel.label) {
+      oldLabels[v._pendingLabel.addr] = v._pendingLabel.label;
+    }
     v.owners = [...s.owners].map(o => ({
       addr: o,
       label: oldLabels[o.toLowerCase()] || (o.toLowerCase() === you?.toLowerCase() ? 'YOU' : ''),
       you: o.toLowerCase() === you?.toLowerCase()
     }));
     v.loadedOwners = [...s.owners];
+    // Persist pending label to DB then clear it
+    if(v._pendingLabel && v._pendingLabel.label && v.dbId) {
+      const pl = v._pendingLabel;
+      const match = v.owners.find(o => o.addr.toLowerCase() === pl.addr);
+      if(match) dbUpdateOwnerLabel(v.dbId, match.addr, pl.label);
+    }
+    delete v._pendingLabel;
     v.holdings = await loadTokenBalances(v.address, s.balance);
     await Promise.all([loadVaultQueue(vi), loadVaultHistory(vi)]);
     if(v.dbId) dbSyncWalletState(v.address, v.dbId);
@@ -2531,8 +2542,11 @@ async function prodAdminPropose(action, val) {
         const raw = document.getElementById('admin-add-owner')?.value?.trim();
         if(!raw) { flash('ENTER AN ADDRESS'); return; }
         const addr = await resolveName(raw);
+        const addLabel = document.getElementById('admin-add-label')?.value?.trim() || '';
         data = msIface.encodeFunctionData('addOwner', [addr]);
         desc = `addOwner(${addr.slice(0,10)}...)`;
+        // Store label so it can be applied after execution
+        v._pendingLabel = { addr: addr.toLowerCase(), label: addLabel };
         break;
       }
       case 'removeOwner': {

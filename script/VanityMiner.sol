@@ -8,13 +8,19 @@ import {Script, console} from "forge-std/Script.sol";
 /// @dev Usage:
 ///   Set MODE env var to select:
 ///
-///   MODE=factory (default) — Mine the MultisigFactory address via SafeSummoner.
-///     DEPLOYER   — SafeSummoner address (default: 0x00000000004473e1f31C8266612e7FD5504e6f2a)
-///     INIT_CODE  — Full creation bytecode of MultisigFactory (hex, no 0x prefix OK)
+///   MODE=deployer (default) — Mine any contract's address via SafeSummoner CREATE2.
+///     INIT_CODE  — Full creation bytecode (hex). Get via: forge inspect <Contract> bytecode
 ///     PREFIX     — Desired hex prefix (default: "0000")
+///     TRAILING   — If "true", match trailing bytes instead of leading (default: false)
+///     DEPLOYER   — SafeSummoner address (default: 0x00000000004473e1f31C8266612e7FD5504e6f2a)
 ///     CALLER     — (optional) msg.sender for front-run protection
 ///     OFFSET     — (optional) start nonce (default 0)
 ///     BATCH      — (optional) salts per run (default 1_000_000)
+///
+///   Examples:
+///     INIT_CODE=$(forge inspect MultisigFactory bytecode) forge script script/VanityMiner.sol -vvv
+///     INIT_CODE=$(forge inspect DeadmanSwitch bytecode) PREFIX=1111 TRAILING=true forge script script/VanityMiner.sol -vvv
+///     INIT_CODE=$(forge inspect AllowlistGuard bytecode) PREFIX=1111 forge script script/VanityMiner.sol -vvv
 ///
 ///   MODE=wallet — Mine multisig wallet addresses via MultisigFactory clone CREATE2.
 ///     FACTORY        — MultisigFactory address
@@ -28,20 +34,22 @@ import {Script, console} from "forge-std/Script.sol";
 ///     forge script script/VanityMiner.sol -vvv
 contract VanityMiner is Script {
     function run() public view {
-        string memory mode = vm.envOr("MODE", string("factory"));
+        string memory mode = vm.envOr("MODE", string("deployer"));
 
         if (keccak256(bytes(mode)) == keccak256("wallet")) {
             _mineWallet();
         } else {
-            _mineFactory();
+            _mineDeployer();
         }
     }
 
-    /// @dev Mine the MultisigFactory address deployed via SafeSummoner.create2Deploy.
-    function _mineFactory() internal view {
+    /// @dev Mine any contract address deployed via SafeSummoner.create2Deploy.
+    /// Supports both leading prefix (default) and trailing suffix matching.
+    function _mineDeployer() internal view {
         address deployer = vm.envOr("DEPLOYER", address(0x00000000004473e1f31C8266612e7FD5504e6f2a));
         bytes memory initCode = vm.envBytes("INIT_CODE");
         string memory prefix = vm.envOr("PREFIX", string("0000"));
+        bool trailing = vm.envOr("TRAILING", false);
         address caller = vm.envOr("CALLER", address(0));
         uint256 offset = vm.envOr("OFFSET", uint256(0));
         uint256 batch = vm.envOr("BATCH", uint256(1_000_000));
@@ -50,11 +58,11 @@ contract VanityMiner is Script {
         bytes memory target = _hexToBytes(prefix);
         uint256 targetLen = target.length;
 
-        console.log("=== VanityMiner (Factory via SafeSummoner) ===");
+        console.log("=== VanityMiner (Contract via SafeSummoner) ===");
         console.log("Deployer:      ", deployer);
         console.log("InitCodeHash:  ");
         console.logBytes32(initCodeHash);
-        console.log("Prefix:         0x%s", prefix);
+        console.log("Prefix:         0x%s (%s)", prefix, trailing ? "trailing" : "leading");
         if (caller != address(0)) console.log("Caller:        ", caller);
         console.log("Searching %d salts from offset %d ...", batch, offset);
         console.log("");
@@ -64,7 +72,8 @@ contract VanityMiner is Script {
             bytes32 salt = caller == address(0) ? bytes32(i) : keccak256(abi.encodePacked(caller, i));
 
             address predicted = _predict(deployer, salt, initCodeHash);
-            if (_matchesPrefix(predicted, target, targetLen)) {
+            if (trailing ? _matchesSuffix(predicted, target, targetLen) : _matchesPrefix(predicted, target, targetLen))
+            {
                 found++;
                 console.log("MATCH #%d", found);
                 console.log("  nonce:   %d", i);
@@ -155,6 +164,14 @@ contract VanityMiner is Script {
         bytes20 raw = bytes20(addr);
         for (uint256 i; i < len; i++) {
             if (raw[i] != target[i]) return false;
+        }
+        return true;
+    }
+
+    function _matchesSuffix(address addr, bytes memory target, uint256 len) internal pure returns (bool) {
+        bytes20 raw = bytes20(addr);
+        for (uint256 i; i < len; i++) {
+            if (raw[19 - i] != target[len - 1 - i]) return false;
         }
         return true;
     }

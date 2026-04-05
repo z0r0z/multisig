@@ -16,8 +16,8 @@ import {IMultisig} from "./interfaces/IMultisig.sol";
 /// WARNING: Do NOT deploy at a vanity `0x1111` address (pre/post guard).
 /// The Multisig hook call would hit this contract and revert.
 contract TimelockExecutor {
-    event Forwarded(address indexed multisig, bytes32 indexed hash);
     event ForwardEnabled(address indexed multisig, bool enabled);
+    event Forwarded(address indexed multisig, bytes32 indexed hash);
 
     error InvalidSig();
     error Unauthorized();

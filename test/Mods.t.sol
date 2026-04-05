@@ -955,7 +955,7 @@ contract ModsTest is Test {
         address atkOwner = vm.addr(atkPk);
         address[] memory atkOwners = new address[](1);
         atkOwners[0] = atkOwner;
-        Multisig attacker = Multisig(payable(factory.create(atkOwners, 0, 1, address(cancelMod), nextSalt++)));
+        factory.create(atkOwners, 0, 1, address(cancelMod), nextSalt++);
 
         // Attacker signs over the VICTIM's domain trying to drain it
         // This should fail because atkOwner is not an owner of victim
@@ -1004,7 +1004,6 @@ contract ModsTest is Test {
 
         // Attacker with different owner tries to cancel
         uint256 atkPk = 0xDEAD;
-        address atkOwner = vm.addr(atkPk);
         bytes memory cancelData = abi.encodeCall(Multisig.cancelQueued, (queuedHash));
         bytes32 hash = victim.getTransactionHash(address(victim), 0, cancelData, victim.nonce());
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(atkPk, hash);

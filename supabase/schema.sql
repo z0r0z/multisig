@@ -1,346 +1,489 @@
--- Multisig Supabase Schema
--- Supports: Ethereum (1), Base (8453), Sepolia (11155111), Base Sepolia (84532)
+-- MULTISIG.software — Supabase Schema
+-- Single canonical file. Safe to run on fresh or existing DB.
 
--- ============================================================
--- Wallets
--- ============================================================
+-- ── TABLES ───────────────────────────────────────────────────────
 
-create table wallets (
-  id          uuid primary key default gen_random_uuid(),
-  chain_id    int not null,
-  address     text not null,
-  deployer    text not null,
-  salt        numeric not null,
-  threshold   smallint not null,
-  owner_count smallint not null,
-  delay       int not null default 0,
-  executor    text not null default '0x0000000000000000000000000000000000000000',
-  nonce       int not null default 0,
-  created_at  timestamptz not null default now(),
+CREATE TABLE IF NOT EXISTS wallets (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  chain_id      int NOT NULL,
+  address       text NOT NULL,
+  deployer      text NOT NULL,
+  salt          numeric NOT NULL,
+  name          text,
+  threshold     smallint NOT NULL,
+  owner_count   smallint NOT NULL,
+  delay         int NOT NULL DEFAULT 0,
+  executor      text NOT NULL DEFAULT '0x0000000000000000000000000000000000000000',
+  nonce         int NOT NULL DEFAULT 0,
+  created_at    timestamptz NOT NULL DEFAULT now(),
   created_block bigint,
-  created_tx  text,
-
-  unique (chain_id, address)
+  created_tx    text,
+  UNIQUE (chain_id, address)
 );
 
-create index idx_wallets_chain on wallets (chain_id);
+-- Add columns if migrating from older schema
+ALTER TABLE wallets ADD COLUMN IF NOT EXISTS name text;
 
--- ============================================================
--- Owners
--- ============================================================
--- Current and historical owners. is_current = false after removal.
--- Position tracks linked-list order (0-indexed) for removeOwner prev lookup.
+CREATE INDEX IF NOT EXISTS idx_wallets_chain ON wallets (chain_id);
 
-create table owners (
-  id            uuid primary key default gen_random_uuid(),
-  wallet_id     uuid not null references wallets on delete cascade,
-  address       text not null,
-  position      smallint not null default 0,
-  is_current    boolean not null default true,
-  added_at      timestamptz not null default now(),
+CREATE TABLE IF NOT EXISTS owners (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  wallet_id     uuid NOT NULL REFERENCES wallets ON DELETE CASCADE,
+  address       text NOT NULL,
+  label         text,
+  position      smallint NOT NULL DEFAULT 0,
+  is_current    boolean NOT NULL DEFAULT true,
+  added_at      timestamptz NOT NULL DEFAULT now(),
   added_block   bigint,
   removed_at    timestamptz,
   removed_block bigint
 );
 
-create index idx_owners_wallet on owners (wallet_id) where is_current = true;
-create index idx_owners_address on owners (address, is_current) where is_current = true;
-create unique index idx_owners_unique on owners (wallet_id, address) where is_current = true;
+ALTER TABLE owners ADD COLUMN IF NOT EXISTS label text;
 
--- ============================================================
--- Transactions (proposals)
--- ============================================================
--- A proposed multisig tx. Status tracks lifecycle:
---   proposed → signed → executing → queued → executed
---                                 → cancelled
---                     → executed  (no delay)
+CREATE INDEX IF NOT EXISTS idx_owners_wallet ON owners (wallet_id) WHERE is_current = true;
+CREATE INDEX IF NOT EXISTS idx_owners_address ON owners (address, is_current) WHERE is_current = true;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_owners_unique ON owners (wallet_id, address) WHERE is_current = true;
 
-create type tx_status as enum ('proposed', 'executing', 'queued', 'executed', 'cancelled', 'failed');
+DO $$ BEGIN
+  CREATE TYPE tx_status AS ENUM ('proposed', 'executing', 'queued', 'executed', 'cancelled', 'failed');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-create table transactions (
-  id            uuid primary key default gen_random_uuid(),
-  wallet_id     uuid not null references wallets on delete cascade,
-  chain_id      int not null,
-  nonce         int not null,
-  target        text not null,
-  value         numeric not null default 0,
-  call_data     text not null default '0x',
-  tx_hash       text not null,              -- EIP-712 hash
-  status        tx_status not null default 'proposed',
-  threshold     smallint not null,          -- snapshot at proposal time
-  description   text,                       -- human-readable label
-  proposed_by   text,                       -- address of proposer
-  proposed_at   timestamptz not null default now(),
-
-  -- queue / timelock
-  eta           bigint,                     -- unix timestamp when executable
-  queued_at     timestamptz,
-  queued_block  bigint,
-
-  -- execution
-  executed_at   timestamptz,
-  executed_block bigint,
-  execution_tx  text,                       -- on-chain tx hash of execute call
-
-  -- cancellation
-  cancelled_at  timestamptz,
-  cancelled_by  text,
-
-  unique (wallet_id, nonce),
-  unique (chain_id, tx_hash)
+CREATE TABLE IF NOT EXISTS transactions (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  wallet_id       uuid NOT NULL REFERENCES wallets ON DELETE CASCADE,
+  chain_id        int NOT NULL,
+  nonce           int NOT NULL,
+  target          text NOT NULL,
+  value           numeric NOT NULL DEFAULT 0,
+  call_data       text NOT NULL DEFAULT '0x',
+  tx_hash         text NOT NULL,
+  status          tx_status NOT NULL DEFAULT 'proposed',
+  threshold       smallint NOT NULL,
+  description     text,
+  proposed_by     text,
+  proposed_at     timestamptz NOT NULL DEFAULT now(),
+  eta             bigint,
+  queued_at       timestamptz,
+  queued_block    bigint,
+  executed_at     timestamptz,
+  executed_block  bigint,
+  execution_tx    text,
+  cancelled_at    timestamptz,
+  cancelled_by    text,
+  UNIQUE (wallet_id, nonce),
+  UNIQUE (chain_id, tx_hash)
 );
 
-create index idx_tx_wallet_status on transactions (wallet_id, status);
-create index idx_tx_chain on transactions (chain_id);
-create index idx_tx_proposed_by on transactions (proposed_by);
+CREATE INDEX IF NOT EXISTS idx_tx_wallet_status ON transactions (wallet_id, status);
+CREATE INDEX IF NOT EXISTS idx_tx_chain ON transactions (chain_id);
+CREATE INDEX IF NOT EXISTS idx_tx_proposed_by ON transactions (proposed_by);
 
--- ============================================================
--- Signatures
--- ============================================================
--- Collected off-chain ECDSA signatures for a transaction.
--- Ordered by signer address ascending (contract requirement).
+DO $$ BEGIN
+  CREATE TYPE sig_type AS ENUM ('ecdsa', 'approval', 'sender');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-create type sig_type as enum ('ecdsa', 'approval', 'sender');
-
-create table signatures (
-  id            uuid primary key default gen_random_uuid(),
-  tx_id         uuid not null references transactions on delete cascade,
-  signer        text not null,
-  sig_type      sig_type not null default 'ecdsa',
-  signature     text not null,              -- full 0x-prefixed 65-byte hex
-  signed_at     timestamptz not null default now(),
-
-  unique (tx_id, signer)
+CREATE TABLE IF NOT EXISTS signatures (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tx_id       uuid NOT NULL REFERENCES transactions ON DELETE CASCADE,
+  signer      text NOT NULL,
+  sig_type    sig_type NOT NULL DEFAULT 'ecdsa',
+  signature   text NOT NULL,
+  signed_at   timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (tx_id, signer)
 );
 
-create index idx_sigs_tx on signatures (tx_id);
+CREATE INDEX IF NOT EXISTS idx_sigs_tx ON signatures (tx_id);
 
--- ============================================================
--- Approvals (on-chain)
--- ============================================================
--- Tracks approve(hash, bool) calls. Separate from off-chain sigs
--- because these are on-chain state that can be revoked.
-
-create table approvals (
-  id            uuid primary key default gen_random_uuid(),
-  wallet_id     uuid not null references wallets on delete cascade,
-  chain_id      int not null,
-  owner         text not null,
-  tx_hash       text not null,              -- the hash being approved
-  approved      boolean not null default true,
+CREATE TABLE IF NOT EXISTS approvals (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  wallet_id     uuid NOT NULL REFERENCES wallets ON DELETE CASCADE,
+  chain_id      int NOT NULL,
+  owner         text NOT NULL,
+  tx_hash       text NOT NULL,
+  approved      boolean NOT NULL DEFAULT true,
   block_number  bigint,
-  approval_tx   text,                       -- on-chain tx hash
-  updated_at    timestamptz not null default now(),
-
-  unique (wallet_id, owner, tx_hash)
+  approval_tx   text,
+  updated_at    timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (wallet_id, owner, tx_hash)
 );
 
-create index idx_approvals_hash on approvals (tx_hash) where approved = true;
+CREATE INDEX IF NOT EXISTS idx_approvals_hash ON approvals (tx_hash) WHERE approved = true;
 
--- ============================================================
--- Configuration history
--- ============================================================
--- Append-only log of wallet config changes for audit / validation.
+DO $$ BEGIN
+  CREATE TYPE config_event AS ENUM (
+    'init', 'threshold_changed', 'delay_changed',
+    'executor_changed', 'owner_added', 'owner_removed'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-create type config_event as enum (
-  'init', 'threshold_changed', 'delay_changed',
-  'executor_changed', 'owner_added', 'owner_removed'
-);
-
-create table config_log (
-  id            uuid primary key default gen_random_uuid(),
-  wallet_id     uuid not null references wallets on delete cascade,
-  event         config_event not null,
+CREATE TABLE IF NOT EXISTS config_log (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  wallet_id     uuid NOT NULL REFERENCES wallets ON DELETE CASCADE,
+  event         config_event NOT NULL,
   block_number  bigint,
   tx_hash       text,
   threshold     smallint,
   delay         int,
   executor      text,
   owner_count   smallint,
-  subject       text,                       -- address of added/removed owner
-  created_at    timestamptz not null default now()
+  subject       text,
+  created_at    timestamptz NOT NULL DEFAULT now()
 );
 
-create index idx_config_wallet on config_log (wallet_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_config_wallet ON config_log (wallet_id, created_at);
 
--- ============================================================
--- Views
--- ============================================================
+-- ── VIEWS ────────────────────────────────────────────────────────
 
--- My multisigs: find all wallets where a given address is a current owner.
--- Query: select * from my_wallets where owner = '0x...'
-create view my_wallets as
-  select
-    w.*,
-    o.address as owner
-  from wallets w
-  join owners o on o.wallet_id = w.id and o.is_current = true;
+DROP VIEW IF EXISTS pending_txs; -- legacy, removed
+DROP VIEW IF EXISTS tx_summary;
+DROP VIEW IF EXISTS my_wallets;
 
--- Transaction summary with signature progress.
-create view tx_summary as
-  select
+CREATE VIEW my_wallets AS
+  SELECT
+    w.id, w.chain_id, w.address, w.name, w.threshold, w.owner_count,
+    w.delay, w.executor, w.nonce,
+    o.address AS owner
+  FROM wallets w
+  JOIN owners o ON o.wallet_id = w.id AND o.is_current = true;
+
+CREATE VIEW tx_summary AS
+  SELECT
     t.*,
-    count(s.id) as sig_count,
-    t.threshold as sigs_needed,
-    count(s.id) >= t.threshold as ready,
-    case
-      when t.status = 'queued' and t.eta is not null
-        then t.eta <= extract(epoch from now())
-      else false
-    end as queue_ready
-  from transactions t
-  left join signatures s on s.tx_id = t.id
-  group by t.id;
+    count(s.id) AS sig_count,
+    t.threshold AS sigs_needed,
+    count(s.id) >= t.threshold AS ready,
+    CASE
+      WHEN t.status = 'queued' AND t.eta IS NOT NULL
+        THEN t.eta <= extract(epoch FROM now())
+      ELSE false
+    END AS queue_ready
+  FROM transactions t
+  LEFT JOIN signatures s ON s.tx_id = t.id
+  GROUP BY t.id;
 
--- Pending approvals: transactions waiting for more signatures.
-create view pending_txs as
-  select * from tx_summary
-  where status in ('proposed', 'executing')
-  and not ready;
+CREATE VIEW tx_history AS
+  SELECT
+    t.id, t.wallet_id, t.nonce, t.target, t.value, t.call_data,
+    t.tx_hash, t.status, t.description, t.proposed_by,
+    t.proposed_at, t.eta, t.executed_at, t.executed_block,
+    t.execution_tx, t.cancelled_at, t.cancelled_by
+  FROM transactions t
+  WHERE t.status IN ('executed', 'cancelled')
+  ORDER BY COALESCE(t.executed_at, t.cancelled_at) DESC;
 
--- ============================================================
--- RLS policies
--- ============================================================
--- Public read, authenticated write. Adjust per app needs.
+-- ── RLS ──────────────────────────────────────────────────────────
 
-alter table wallets enable row level security;
-alter table owners enable row level security;
-alter table transactions enable row level security;
-alter table signatures enable row level security;
-alter table approvals enable row level security;
-alter table config_log enable row level security;
+ALTER TABLE wallets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE owners ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE signatures ENABLE ROW LEVEL SECURITY;
+ALTER TABLE approvals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE config_log ENABLE ROW LEVEL SECURITY;
 
--- Public read and write — all data is public (blockchain mirrors).
--- Writes are primarily routed through security definer functions,
--- but direct access is allowed for flexibility.
-create policy wallets_all on wallets for all using (true) with check (true);
-create policy owners_all on owners for all using (true) with check (true);
-create policy tx_all on transactions for all using (true) with check (true);
-create policy sigs_all on signatures for all using (true) with check (true);
-create policy approvals_all on approvals for all using (true) with check (true);
-create policy config_all on config_log for all using (true) with check (true);
+DROP POLICY IF EXISTS wallets_all ON wallets;
+DROP POLICY IF EXISTS owners_all ON owners;
+DROP POLICY IF EXISTS tx_all ON transactions;
+DROP POLICY IF EXISTS sigs_all ON signatures;
+DROP POLICY IF EXISTS approvals_all ON approvals;
+DROP POLICY IF EXISTS config_all ON config_log;
+DROP POLICY IF EXISTS wallets_read ON wallets;
+DROP POLICY IF EXISTS owners_read ON owners;
+DROP POLICY IF EXISTS tx_read ON transactions;
+DROP POLICY IF EXISTS sigs_read ON signatures;
+DROP POLICY IF EXISTS approvals_read ON approvals;
+DROP POLICY IF EXISTS config_read ON config_log;
 
--- ============================================================
--- Functions
--- ============================================================
+-- Read-only for anon role. All writes go through SECURITY DEFINER functions.
+CREATE POLICY wallets_read ON wallets FOR SELECT USING (true);
+CREATE POLICY owners_read ON owners FOR SELECT USING (true);
+CREATE POLICY tx_read ON transactions FOR SELECT USING (true);
+CREATE POLICY sigs_read ON signatures FOR SELECT USING (true);
+CREATE POLICY approvals_read ON approvals FOR SELECT USING (true);
+CREATE POLICY config_read ON config_log FOR SELECT USING (true);
 
--- Register a new wallet from factory deployment.
-create or replace function register_wallet(
-  p_chain_id int,
-  p_address text,
-  p_deployer text,
-  p_salt numeric,
-  p_owners text[],
-  p_threshold smallint,
-  p_delay int,
-  p_executor text,
-  p_block bigint,
-  p_tx text
-) returns uuid as $$
-declare
+-- ── HELPERS ──────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION is_wallet_owner(p_wallet_id uuid, p_address text)
+RETURNS boolean AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM owners
+    WHERE wallet_id = p_wallet_id
+      AND lower(address) = lower(p_address)
+      AND is_current = true
+  );
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+-- ── FUNCTIONS ────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION register_wallet(
+  p_chain_id int, p_address text, p_deployer text, p_salt numeric,
+  p_owners text[], p_threshold smallint, p_delay int, p_executor text,
+  p_block bigint, p_tx text,
+  p_name text DEFAULT NULL, p_labels text[] DEFAULT NULL,
+  p_nonce int DEFAULT 0
+) RETURNS uuid AS $$
+DECLARE
   w_id uuid;
   i int;
-begin
-  insert into wallets (chain_id, address, deployer, salt, threshold, owner_count, delay, executor, created_block, created_tx)
-  values (p_chain_id, p_address, p_deployer, p_salt, p_threshold, array_length(p_owners, 1), p_delay, p_executor, p_block, p_tx)
-  returning id into w_id;
+BEGIN
+  -- Deployer must be in the owner list (case-insensitive)
+  IF NOT (SELECT lower(p_deployer) = ANY(SELECT lower(unnest(p_owners)))) THEN
+    RAISE EXCEPTION 'Deployer must be an owner';
+  END IF;
 
-  for i in 1..array_length(p_owners, 1) loop
-    insert into owners (wallet_id, address, position, added_block)
-    values (w_id, p_owners[i], i - 1, p_block);
-  end loop;
+  INSERT INTO wallets (chain_id, address, deployer, salt, name, threshold, owner_count, delay, executor, nonce, created_block, created_tx)
+  VALUES (p_chain_id, p_address, p_deployer, p_salt, p_name, p_threshold, array_length(p_owners, 1), p_delay, p_executor, p_nonce, p_block, p_tx)
+  ON CONFLICT (chain_id, address) DO UPDATE SET
+    threshold = EXCLUDED.threshold, delay = EXCLUDED.delay, executor = EXCLUDED.executor,
+    owner_count = EXCLUDED.owner_count, nonce = GREATEST(wallets.nonce, EXCLUDED.nonce),
+    name = COALESCE(EXCLUDED.name, wallets.name)
+  RETURNING id INTO w_id;
 
-  insert into config_log (wallet_id, event, block_number, tx_hash, threshold, delay, executor, owner_count)
-  values (w_id, 'init', p_block, p_tx, p_threshold, p_delay, p_executor, array_length(p_owners, 1));
+  UPDATE owners SET is_current = false, removed_at = now()
+  WHERE wallet_id = w_id AND is_current = true;
 
-  return w_id;
-end;
-$$ language plpgsql security definer;
+  FOR i IN 1..array_length(p_owners, 1) LOOP
+    INSERT INTO owners (wallet_id, address, label, position, is_current, added_block)
+    VALUES (w_id, p_owners[i],
+            CASE WHEN p_labels IS NOT NULL AND i <= array_length(p_labels, 1) THEN NULLIF(p_labels[i], '') ELSE NULL END,
+            i - 1, true, p_block);
+  END LOOP;
 
--- Propose a transaction: compute hash off-chain, store with metadata.
-create or replace function propose_tx(
-  p_wallet_id uuid,
-  p_chain_id int,
-  p_nonce int,
-  p_target text,
-  p_value numeric,
-  p_call_data text,
-  p_tx_hash text,
-  p_threshold smallint,
-  p_proposed_by text,
-  p_description text default null
-) returns uuid as $$
-declare
+  INSERT INTO config_log (wallet_id, event, block_number, tx_hash, threshold, delay, executor, owner_count)
+  VALUES (w_id, 'init', p_block, p_tx, p_threshold, p_delay, p_executor, array_length(p_owners, 1))
+  ON CONFLICT DO NOTHING;
+
+  RETURN w_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION propose_tx(
+  p_wallet_id uuid, p_chain_id int, p_nonce int,
+  p_target text, p_value numeric, p_call_data text,
+  p_tx_hash text, p_threshold smallint, p_proposed_by text,
+  p_description text DEFAULT NULL
+) RETURNS uuid AS $$
+DECLARE
   t_id uuid;
-begin
-  insert into transactions (wallet_id, chain_id, nonce, target, value, call_data, tx_hash, threshold, proposed_by, description)
-  values (p_wallet_id, p_chain_id, p_nonce, p_target, p_value, p_call_data, p_tx_hash, p_threshold, p_proposed_by, p_description)
-  returning id into t_id;
+BEGIN
+  IF NOT is_wallet_owner(p_wallet_id, p_proposed_by) THEN
+    RAISE EXCEPTION 'Not an owner';
+  END IF;
 
-  return t_id;
-end;
-$$ language plpgsql security definer;
+  INSERT INTO transactions (wallet_id, chain_id, nonce, target, value, call_data, tx_hash, threshold, proposed_by, description)
+  VALUES (p_wallet_id, p_chain_id, p_nonce, p_target, p_value, p_call_data, p_tx_hash, p_threshold, p_proposed_by, p_description)
+  ON CONFLICT DO NOTHING
+  RETURNING id INTO t_id;
 
--- Add a signature to a transaction. Returns current sig count.
-create or replace function add_signature(
-  p_tx_id uuid,
-  p_signer text,
-  p_signature text,
-  p_sig_type sig_type default 'ecdsa'
-) returns int as $$
-declare
+  IF t_id IS NULL THEN
+    SELECT id INTO t_id FROM transactions WHERE chain_id = p_chain_id AND tx_hash = p_tx_hash LIMIT 1;
+  END IF;
+
+  RETURN t_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION add_signature(
+  p_tx_id uuid, p_signer text, p_signature text,
+  p_sig_type sig_type DEFAULT 'ecdsa'
+) RETURNS int AS $$
+DECLARE
   cnt int;
-begin
-  insert into signatures (tx_id, signer, sig_type, signature)
-  values (p_tx_id, p_signer, p_sig_type, p_signature)
-  on conflict (tx_id, signer) do update set
-    signature = excluded.signature,
-    sig_type = excluded.sig_type,
-    signed_at = now();
+  w_id uuid;
+BEGIN
+  SELECT wallet_id INTO w_id FROM transactions WHERE id = p_tx_id;
+  IF w_id IS NULL THEN
+    RAISE EXCEPTION 'Transaction not found';
+  END IF;
+  IF NOT is_wallet_owner(w_id, p_signer) THEN
+    RAISE EXCEPTION 'Not an owner';
+  END IF;
 
-  select count(*) into cnt from signatures where tx_id = p_tx_id;
-  return cnt;
-end;
-$$ language plpgsql security definer;
+  INSERT INTO signatures (tx_id, signer, sig_type, signature)
+  VALUES (p_tx_id, p_signer, p_sig_type, p_signature)
+  ON CONFLICT (tx_id, signer) DO UPDATE SET
+    signature = EXCLUDED.signature, sig_type = EXCLUDED.sig_type, signed_at = now();
 
--- Mark transaction as executed.
-create or replace function mark_executed(
-  p_tx_id uuid,
-  p_block bigint,
-  p_execution_tx text
-) returns void as $$
-begin
-  update transactions
-  set status = 'executed', executed_at = now(), executed_block = p_block, execution_tx = p_execution_tx
-  where id = p_tx_id;
+  SELECT count(*) INTO cnt FROM signatures WHERE tx_id = p_tx_id;
+  RETURN cnt;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
-  -- Bump wallet nonce
-  update wallets set nonce = nonce + 1
-  where id = (select wallet_id from transactions where id = p_tx_id);
-end;
-$$ language plpgsql security definer;
+CREATE OR REPLACE FUNCTION mark_executed(
+  p_tx_id uuid, p_block bigint, p_execution_tx text,
+  p_caller text DEFAULT NULL
+) RETURNS void AS $$
+DECLARE
+  w_id uuid;
+  prev_status tx_status;
+BEGIN
+  SELECT wallet_id, status INTO w_id, prev_status FROM transactions WHERE id = p_tx_id;
+  IF w_id IS NULL THEN
+    RAISE EXCEPTION 'Transaction not found';
+  END IF;
+  IF p_caller IS NOT NULL AND NOT is_wallet_owner(w_id, p_caller) THEN
+    RAISE EXCEPTION 'Not an owner';
+  END IF;
 
--- Mark transaction as queued with ETA.
-create or replace function mark_queued(
-  p_tx_id uuid,
-  p_eta bigint,
-  p_block bigint
-) returns void as $$
-begin
-  update transactions
-  set status = 'queued', eta = p_eta, queued_at = now(), queued_block = p_block
-  where id = p_tx_id;
-end;
-$$ language plpgsql security definer;
+  UPDATE transactions
+  SET status = 'executed', executed_at = now(), executed_block = p_block, execution_tx = p_execution_tx
+  WHERE id = p_tx_id;
 
--- Cancel a queued transaction (executor only — enforce in app layer).
-create or replace function cancel_tx(
-  p_tx_id uuid,
-  p_cancelled_by text
-) returns void as $$
-begin
-  update transactions
-  set status = 'cancelled', cancelled_at = now(), cancelled_by = p_cancelled_by
-  where id = p_tx_id and status = 'queued';
-end;
-$$ language plpgsql security definer;
+  -- Increment nonce for real executions only:
+  -- Skip if queued (already incremented at queue time) or if block=0 (stale tx cleanup)
+  IF prev_status != 'queued' AND p_block > 0 THEN
+    UPDATE wallets SET nonce = nonce + 1 WHERE id = w_id;
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION mark_queued(
+  p_tx_id uuid, p_eta bigint, p_block bigint,
+  p_caller text DEFAULT NULL
+) RETURNS void AS $$
+DECLARE
+  w_id uuid;
+BEGIN
+  SELECT wallet_id INTO w_id FROM transactions WHERE id = p_tx_id;
+  IF w_id IS NULL THEN
+    RAISE EXCEPTION 'Transaction not found';
+  END IF;
+  IF p_caller IS NOT NULL AND NOT is_wallet_owner(w_id, p_caller) THEN
+    RAISE EXCEPTION 'Not an owner';
+  END IF;
+
+  UPDATE transactions
+  SET status = 'queued', eta = p_eta, queued_at = now(), queued_block = p_block
+  WHERE id = p_tx_id;
+
+  -- On-chain nonce increments at queue time (execute() is called to queue)
+  UPDATE wallets SET nonce = nonce + 1 WHERE id = w_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION cancel_tx(
+  p_tx_id uuid, p_cancelled_by text
+) RETURNS void AS $$
+DECLARE
+  w_id uuid;
+BEGIN
+  SELECT wallet_id INTO w_id FROM transactions WHERE id = p_tx_id;
+  IF w_id IS NULL THEN
+    RAISE EXCEPTION 'Transaction not found';
+  END IF;
+  IF NOT is_wallet_owner(w_id, p_cancelled_by) THEN
+    RAISE EXCEPTION 'Not an owner';
+  END IF;
+
+  UPDATE transactions
+  SET status = 'cancelled', cancelled_at = now(), cancelled_by = p_cancelled_by
+  WHERE id = p_tx_id AND status = 'queued';
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION remove_signature(
+  p_tx_id uuid, p_signer text
+) RETURNS void AS $$
+DECLARE
+  w_id uuid;
+BEGIN
+  SELECT wallet_id INTO w_id FROM transactions WHERE id = p_tx_id;
+  IF w_id IS NULL THEN
+    RAISE EXCEPTION 'Transaction not found';
+  END IF;
+  IF NOT is_wallet_owner(w_id, p_signer) THEN
+    RAISE EXCEPTION 'Not an owner';
+  END IF;
+
+  DELETE FROM signatures WHERE tx_id = p_tx_id AND signer = p_signer;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION update_wallet_name(
+  p_wallet_id uuid, p_name text, p_caller text
+) RETURNS void AS $$
+BEGIN
+  IF NOT is_wallet_owner(p_wallet_id, p_caller) THEN
+    RAISE EXCEPTION 'Not an owner';
+  END IF;
+  UPDATE wallets SET name = p_name WHERE id = p_wallet_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION update_owner_label(
+  p_wallet_id uuid, p_address text, p_label text, p_caller text
+) RETURNS void AS $$
+BEGIN
+  IF NOT is_wallet_owner(p_wallet_id, p_caller) THEN
+    RAISE EXCEPTION 'Not an owner';
+  END IF;
+  UPDATE owners SET label = p_label
+  WHERE wallet_id = p_wallet_id AND address = p_address AND is_current = true;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION record_approval(
+  p_wallet_id uuid, p_chain_id int, p_owner text, p_tx_hash text,
+  p_approved boolean, p_block_number bigint DEFAULT NULL,
+  p_approval_tx text DEFAULT NULL
+) RETURNS void AS $$
+BEGIN
+  IF NOT is_wallet_owner(p_wallet_id, p_owner) THEN
+    RAISE EXCEPTION 'Not an owner';
+  END IF;
+  INSERT INTO approvals (wallet_id, chain_id, owner, tx_hash, approved, block_number, approval_tx, updated_at)
+  VALUES (p_wallet_id, p_chain_id, p_owner, p_tx_hash, p_approved, p_block_number, p_approval_tx, now())
+  ON CONFLICT (wallet_id, owner, tx_hash) DO UPDATE SET
+    approved = EXCLUDED.approved, block_number = EXCLUDED.block_number,
+    approval_tx = EXCLUDED.approval_tx, updated_at = now();
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION sync_wallet_state(
+  p_wallet_id uuid, p_caller text,
+  p_threshold smallint, p_owner_count smallint, p_delay int,
+  p_executor text, p_nonce int,
+  p_owners text[]
+) RETURNS void AS $$
+DECLARE
+  i int;
+  existing text[];
+BEGIN
+  IF NOT is_wallet_owner(p_wallet_id, p_caller) THEN
+    RAISE EXCEPTION 'Not an owner';
+  END IF;
+
+  UPDATE wallets SET
+    threshold = p_threshold, owner_count = p_owner_count,
+    delay = p_delay, executor = p_executor, nonce = p_nonce
+  WHERE id = p_wallet_id;
+
+  -- Mark removed owners
+  SELECT array_agg(address) INTO existing
+  FROM owners WHERE wallet_id = p_wallet_id AND is_current = true;
+
+  IF existing IS NOT NULL THEN
+    FOR i IN 1..array_length(existing, 1) LOOP
+      IF NOT (SELECT lower(existing[i]) = ANY(SELECT lower(unnest(p_owners)))) THEN
+        UPDATE owners SET is_current = false, removed_at = now()
+        WHERE wallet_id = p_wallet_id AND address = existing[i] AND is_current = true;
+      END IF;
+    END LOOP;
+  END IF;
+
+  -- Add new owners
+  FOR i IN 1..array_length(p_owners, 1) LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM owners
+      WHERE wallet_id = p_wallet_id AND lower(address) = lower(p_owners[i]) AND is_current = true
+    ) THEN
+      INSERT INTO owners (wallet_id, address, position, is_current)
+      VALUES (p_wallet_id, p_owners[i], i - 1, true);
+    END IF;
+  END LOOP;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;

@@ -8,10 +8,12 @@ const WC_PROJECT_ID = '1e8390ef1c1d8a185e035912a1409749';
 const _escMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;' };
 function _esc(s) { return String(s).replace(/[&<>]/g, m => _escMap[m]); }
 
-// --- State ---
+// --- State (globals for app to read) ---
 window._walletProvider = null;
 window._signer = null;
 window._connectedAddress = null;
+window._walletDisplayName = null;
+window._walletConnecting = false;
 window._isWalletConnect = false;
 window._connectedWalletProvider = null;
 window.eip6963Providers = new Map();
@@ -43,33 +45,36 @@ function detectWallets() {
     const name = info?.name || 'Unknown';
     if (seenNames.has(name.toLowerCase())) continue;
     const iconUrl = info.icon && (info.icon.startsWith('data:image/') || info.icon.startsWith('https://')) ? info.icon : null;
-    const safeIcon = iconUrl ? `<img src="${_esc(iconUrl).replace(/"/g, '&quot;').replace(/'/g, '&#39;')}" style="width:1.5rem;height:1.5rem;border-radius:4px;">` : '';
+    const safeIcon = iconUrl ? `<img src="${_esc(iconUrl).replace(/"/g, '&quot;').replace(/'/g, '&#39;')}" style="width:1.5rem;height:1.5rem;">` : '';
     detected.push({ key: `eip6963_${uuid}`, name, icon: safeIcon, getProvider: () => provider });
     seenNames.add(name.toLowerCase());
   }
   if (!detected.length && window.ethereum) detected.push({ key: 'injected', name: 'Browser Wallet', icon: '', getProvider: () => window.ethereum });
-  const wcModule = globalThis['@walletconnect/ethereum-provider'];
-  if (wcModule?.EthereumProvider) detected.push({ key: 'walletconnect', name: 'WalletConnect', icon: '' });
+  const WC_ICON = '<svg width="24" height="16" viewBox="0 0 480 332" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="m126.613 93.9842c62.622-61.3123 164.152-61.3123 226.775 0l7.536 7.3788c3.131 3.066 3.131 8.036 0 11.102l-25.781 25.242c-1.566 1.533-4.104 1.533-5.67 0l-10.371-10.154c-43.687-42.7734-114.517-42.7734-158.204 0l-11.107 10.874c-1.565 1.533-4.103 1.533-5.669 0l-25.781-25.242c-3.132-3.066-3.132-8.036 0-11.102zm280.093 52.2038 22.946 22.465c3.131 3.066 3.131 8.036 0 11.102l-103.463 101.301c-3.131 3.065-8.208 3.065-11.339 0l-73.432-71.896c-.783-.767-2.052-.767-2.835 0l-73.43 71.896c-3.131 3.065-8.208 3.065-11.339 0l-103.4657-101.302c-3.1311-3.066-3.1311-8.036 0-11.102l22.9456-22.466c3.1311-3.065 8.2077-3.065 11.3388 0l73.4333 71.897c.782.767 2.051.767 2.834 0l73.429-71.897c3.131-3.065 8.208-3.065 11.339 0l73.433 71.897c.783.767 2.052.767 2.835 0l73.431-71.895c3.132-3.066 8.208-3.066 11.339 0z" fill="#3396ff"/></svg>';
+  detected.push({ key: 'walletconnect', name: 'WalletConnect', icon: WC_ICON });
   return detected;
 }
 
-// --- DOM injection ---
-function injectWalletDOM() {
-  if (document.getElementById('walletBtn')) return;
-  const walletDiv = document.createElement('div');
-  walletDiv.className = 'wallet';
-  walletDiv.innerHTML = '<button id="walletBtn" onclick="toggleWallet()">connect</button>';
-  document.body.appendChild(walletDiv);
+// --- DOM: inject modal only (button rendered by app) ---
+function injectWalletModal() {
+  if (document.getElementById('walletModal')) return;
   const overlay = document.createElement('div');
   overlay.className = 'wallet-modal-overlay';
   overlay.id = 'walletModal';
   overlay.onclick = function(e) { if (e.target === this) closeWalletModal(); };
-  overlay.innerHTML = '<div class="wallet-modal"><div class="wallet-modal-header"><div class="wallet-modal-title">Connect Wallet</div><button class="wallet-modal-close" onclick="closeWalletModal()">&times;</button></div><div class="wallet-modal-body" id="walletOptions"></div></div>';
+  overlay.innerHTML = `<div class="wallet-modal">
+    <div class="wallet-modal-header">
+      <div class="wallet-modal-title">Connect Wallet</div>
+      <button class="wallet-modal-close" onclick="closeWalletModal()">✕</button>
+    </div>
+    <div class="wallet-modal-body" id="walletOptions"></div>
+  </div>`;
   document.body.appendChild(overlay);
 }
 
 // --- Modal ---
 function showWalletModal() {
+  injectWalletModal();
   document.getElementById('walletModal').classList.add('active');
   document.body.classList.add('modal-open');
   window.dispatchEvent(new Event('eip6963:requestProvider'));
@@ -77,17 +82,22 @@ function showWalletModal() {
     const wallets = detectWallets();
     const container = document.getElementById('walletOptions');
     if (_connectedAddress) {
-      const displayName = document.getElementById('walletBtn').textContent;
-      container.innerHTML = `<div style="padding:12px;border:1px solid currentColor;margin-bottom:12px;"><div style="font-size:12px;word-break:break-all;opacity:0.6;">${_esc(_connectedAddress)}</div></div><div class="wallet-option disconnect" onclick="disconnectWallet()"><span class="wallet-option-name">Disconnect</span></div>`;
+      container.innerHTML = `<div class="wallet-addr-display">${_esc(_connectedAddress)}</div>
+        <div class="wallet-option disconnect" onclick="disconnectWallet()"><span class="wallet-option-name">Disconnect</span></div>`;
     } else {
-      container.innerHTML = wallets.length > 0 ? wallets.map(w => `<div class="wallet-option" data-wallet-key="${_esc(w.key)}">${w.icon ? `<span class="wallet-option-icon">${w.icon}</span>` : ''}<span class="wallet-option-name">${_esc(w.name)}</span></div>`).join('') : '<div style="padding:12px;text-align:center;">No wallets detected.</div>';
-      container.querySelectorAll('[data-wallet-key]').forEach(el => { el.addEventListener('click', () => connectWithWallet(el.dataset.walletKey)); });
+      container.innerHTML = wallets.length > 0 ? wallets.map(w =>
+        `<div class="wallet-option" data-wallet-key="${_esc(w.key)}">${w.icon ? `<span class="wallet-option-icon">${w.icon}</span>` : ''}<span class="wallet-option-name">${_esc(w.name)}</span></div>`
+      ).join('') : '<div style="padding:16px;text-align:center;font-size:11px;letter-spacing:2px;color:var(--d)">NO WALLETS DETECTED</div>';
+      container.querySelectorAll('[data-wallet-key]').forEach(el => {
+        el.addEventListener('click', () => connectWithWallet(el.dataset.walletKey));
+      });
     }
   }, 200);
 }
 
 window.closeWalletModal = function() {
-  document.getElementById('walletModal').classList.remove('active');
+  const modal = document.getElementById('walletModal');
+  if (modal) modal.classList.remove('active');
   document.body.classList.remove('modal-open');
 };
 window.toggleWallet = function() { showWalletModal(); };
@@ -97,6 +107,8 @@ window.showWalletModal = showWalletModal;
 async function connectWithWallet(walletKey) {
   if (_isConnecting) return;
   _isConnecting = true;
+  _walletConnecting = true;
+  notifyDisplayUpdate();
   try {
     closeWalletModal();
     let walletProvider;
@@ -140,10 +152,10 @@ async function connectWithWallet(walletKey) {
     _walletProvider = new ethers.BrowserProvider(walletProvider);
     _signer = await _walletProvider.getSigner();
     _connectedAddress = await _signer.getAddress();
+    _walletDisplayName = _connectedAddress.slice(0,6) + '...' + _connectedAddress.slice(-4);
+    _walletConnecting = false;
     const oldWP = _connectedWalletProvider;
     _connectedWalletProvider = walletProvider;
-    document.getElementById('walletBtn').textContent = _connectedAddress.slice(0, 6) + '...' + _connectedAddress.slice(-4);
-    document.getElementById('walletBtn').classList.add('connected');
 
     resolveWeiName(_connectedAddress);
 
@@ -158,7 +170,9 @@ async function connectWithWallet(walletKey) {
     for (const fn of _onConnectCallbacks) { try { fn(); } catch (e) { console.error('onConnect error:', e); } }
   } catch (error) {
     console.error('Wallet connect error:', error);
-    document.getElementById('walletBtn').textContent = 'connect';
+    _walletConnecting = false;
+    _walletDisplayName = null;
+    notifyDisplayUpdate();
   } finally { _isConnecting = false; }
 }
 
@@ -167,8 +181,8 @@ window.disconnectWallet = function() {
   _walletEventHandlers = null;
   if (_walletConnectProvider) { try { _walletConnectProvider.disconnect(); } catch (e) {} _walletConnectProvider = null; }
   _walletProvider = null; _signer = null; _connectedAddress = null; _connectedWalletProvider = null; _isWalletConnect = false;
-  document.getElementById('walletBtn').textContent = 'connect';
-  document.getElementById('walletBtn').classList.remove('connected');
+  _walletDisplayName = null;
+  _walletConnecting = false;
   closeWalletModal();
   try { localStorage.removeItem('ms_wallet'); localStorage.removeItem('ms_wallet_name'); } catch (e) {}
   for (const fn of _onDisconnectCallbacks) { try { fn(); } catch (e) {} }
@@ -180,11 +194,8 @@ window.connectWallet = async function() {
   return null;
 };
 
-const _ethRpcs = [
-  'https://ethereum.publicnode.com',
-  'https://1rpc.io/eth',
-  'https://eth.drpc.org',
-];
+// --- Name resolution ---
+const _ethRpcs = ['https://ethereum.publicnode.com','https://1rpc.io/eth','https://eth.drpc.org'];
 const _ethMainProvider = new ethers.FallbackProvider(
   _ethRpcs.map((url, i) => ({ provider: new ethers.JsonRpcProvider(url, 1, {staticNetwork:true}), priority: i + 1, stallTimeout: 2000 })), 1
 );
@@ -193,20 +204,34 @@ function resolveWeiName(addr) {
   try {
     const ns = new ethers.Contract(WEINS, WEINS_ABI, _ethMainProvider);
     ns.reverseResolve(addr).then(name => {
-      if (name && _connectedAddress === addr) document.getElementById('walletBtn').textContent = name.toLowerCase();
+      if (name && _connectedAddress === addr) {
+        _walletDisplayName = name.toLowerCase();
+        notifyDisplayUpdate();
+      }
     }).catch(() => {
       _ethMainProvider.lookupAddress(addr).then(ensName => {
-        if (ensName && _connectedAddress === addr) document.getElementById('walletBtn').textContent = ensName;
+        if (ensName && _connectedAddress === addr) {
+          _walletDisplayName = ensName;
+          notifyDisplayUpdate();
+        }
       }).catch(() => {});
     });
   } catch (e) {}
 }
 window.resolveWeiName = resolveWeiName;
 
+function notifyDisplayUpdate() {
+  if (typeof window.onWalletDisplayUpdate === 'function') {
+    try { window.onWalletDisplayUpdate(); } catch(e) {}
+  }
+}
+
+// --- Auto-reconnect ---
 async function tryAutoConnect() {
   const savedWallet = localStorage.getItem('ms_wallet');
   if (!savedWallet) return;
-  document.getElementById('walletBtn').textContent = '...';
+  _walletConnecting = true;
+  notifyDisplayUpdate();
   await new Promise(r => setTimeout(r, 400));
   window.dispatchEvent(new Event('eip6963:requestProvider'));
   await new Promise(r => setTimeout(r, 300));
@@ -217,10 +242,12 @@ async function tryAutoConnect() {
       probe = eip6963Providers.get(uuid)?.provider;
       if (!probe) { const savedName = localStorage.getItem('ms_wallet_name')?.toLowerCase(); if (savedName) for (const [, { info, provider }] of eip6963Providers) if (info?.name?.toLowerCase() === savedName) { probe = provider; break; } }
     } else if (savedWallet !== 'walletconnect') probe = window.ethereum;
-    if (probe) { const accts = await probe.request({ method: 'eth_accounts' }); if (!accts || accts.length === 0) { document.getElementById('walletBtn').textContent = 'connect'; return; } }
+    if (probe) { const accts = await probe.request({ method: 'eth_accounts' }); if (!accts || accts.length === 0) { _walletConnecting = false; notifyDisplayUpdate(); return; } }
     await connectWithWallet(savedWallet);
   } catch (e) {
-    document.getElementById('walletBtn').textContent = 'connect';
+    _walletConnecting = false;
+    _walletDisplayName = null;
+    notifyDisplayUpdate();
   }
 }
 
@@ -233,22 +260,22 @@ window.walletInit = function(opts) {
   _addChainParams = opts.addChainParams || null;
   _onConnectCallbacks = Array.isArray(opts.onConnect) ? opts.onConnect : (opts.onConnect ? [opts.onConnect] : []);
   _onDisconnectCallbacks = Array.isArray(opts.onDisconnect) ? opts.onDisconnect : (opts.onDisconnect ? [opts.onDisconnect] : []);
-  injectWalletDOM();
+  injectWalletModal();
   tryAutoConnect();
 };
 
-// Switch chain at runtime (called when user switches network)
+// Switch chain at runtime
 window.walletSwitchChain = async function(opts) {
   _targetChainId = opts.chainId;
   _targetChainHex = opts.chainHex || '0x' + opts.chainId.toString(16);
   _targetRpc = opts.rpc || _targetRpc;
   _addChainParams = opts.addChainParams || null;
-  if(_connectedWalletProvider) {
+  if (_connectedWalletProvider) {
     try {
       const current = await _connectedWalletProvider.request({method:'eth_chainId'});
-      if(BigInt(current) !== BigInt(_targetChainId)) {
+      if (BigInt(current) !== BigInt(_targetChainId)) {
         try { await _connectedWalletProvider.request({method:'wallet_switchEthereumChain', params:[{chainId:_targetChainHex}]}); }
-        catch(e) { if(e.code===4902 && _addChainParams) await _connectedWalletProvider.request({method:'wallet_addEthereumChain', params:[_addChainParams]}); }
+        catch(e) { if (e.code===4902 && _addChainParams) await _connectedWalletProvider.request({method:'wallet_addEthereumChain', params:[_addChainParams]}); }
       }
     } catch(_) {}
   }

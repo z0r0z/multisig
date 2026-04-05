@@ -1,27 +1,13 @@
 # IMultisig
-[Git Source](https://github.com/z0r0z/multisig/blob/cc44c047f803ce7557afb7fae62a8a291e204efe/src/mods/interfaces/IMultisig.sol)
+[Git Source](https://github.com/z0r0z/multisig/blob/88f2fd9c70fcd2f83b9d61859bb5b7eeef042d87/src/mods/interfaces/IMultisig.sol)
 
 
 ## Functions
-### execute
+### nonce
 
 
 ```solidity
-function execute(address target, uint256 value, bytes calldata data, bytes calldata sigs) external payable;
-```
-
-### cancelQueued
-
-
-```solidity
-function cancelQueued(bytes32 hash) external payable;
-```
-
-### isOwner
-
-
-```solidity
-function isOwner(address account) external view returns (bool);
+function nonce() external view returns (uint32);
 ```
 
 ### threshold
@@ -38,10 +24,41 @@ function threshold() external view returns (uint16);
 function ownerCount() external view returns (uint16);
 ```
 
-### getOwners
+### isOwner
 
 
 ```solidity
-function getOwners() external view returns (address[] memory);
+function isOwner(address account) external view returns (bool);
+```
+
+### approved
+
+
+```solidity
+function approved(address owner, bytes32 hash) external view returns (bool);
+```
+
+### cancelQueued
+
+
+```solidity
+function cancelQueued(bytes32 hash) external payable;
+```
+
+### getTransactionHash
+
+
+```solidity
+function getTransactionHash(address target, uint256 value, bytes calldata data, uint32 _nonce)
+    external
+    view
+    returns (bytes32);
+```
+
+### execute
+
+
+```solidity
+function execute(address target, uint256 value, bytes calldata data, bytes calldata sigs) external payable;
 ```
 

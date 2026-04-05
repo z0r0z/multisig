@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>multisig</title>
+<link id="favicon" rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%232D5FE8%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%230A0A0A%22%2F%3E%0A%3C%2Fsvg%3E" type="image/svg+xml">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+:root{
+  --a:#0A0A0A;--bg:#2D5FE8;--d:#0A0A0A99;--m:#0A0A0ACC;
+  --ln:#0A0A0A1A;--fr:#0A0A0A38;--g:#7DFFBA;--gc:#000;
+  --f:'IBM Plex Mono','Courier New',monospace;
+}
+.light{
+  --a:#0099B3;--bg:#FDFDFD;--d:#007A8FAA;--m:#006A7DDD;
+  --ln:#0099B31A;--fr:#0099B332;--g:#059669;--gc:#fff;
+}
+body{font-family:var(--f);background:var(--bg);color:var(--a);min-height:100vh;padding:10px;transition:background .3s,color .3s}
+a{color:var(--a)}
+button{cursor:pointer;font-family:var(--f)}
+button:active{transform:scale(.97)}
+@media(hover:hover){button:hover{opacity:.75}}
+::-webkit-scrollbar{width:3px;height:3px}
+::-webkit-scrollbar-thumb{background:var(--ln)}
+
+.scan{position:fixed;inset:0;pointer-events:none;z-index:100;background:repeating-linear-gradient(0deg,transparent,transparent 3px,#0A0A0A04 3px,#0A0A0A04 6px)}
+.light .scan{background:repeating-linear-gradient(0deg,transparent,transparent 3px,#0099B302 3px,#0099B302 6px)}
+
+.frame{position:relative;padding:0 24px;max-width:780px;margin:0 auto}
+.rail{position:absolute;top:0;bottom:0;width:12px;overflow:hidden;writing-mode:vertical-lr;font-size:11px;letter-spacing:1px;color:var(--fr);user-select:none;line-height:12px}
+.rail-l{left:0}.rail-r{right:0}
+.hbar{font-size:11px;letter-spacing:1px;color:var(--fr);user-select:none;overflow:hidden;white-space:nowrap;line-height:1}
+
+.hdr{display:flex;justify-content:space-between;align-items:center;padding:22px 0 16px}
+.logo{font-size:28px;font-weight:700;letter-spacing:-1px;line-height:1}
+.logo a{text-decoration:none;color:var(--a)}
+.logo-sub{font-size:10px;letter-spacing:2px;color:var(--m);margin-top:4px}
+.theme-btn{background:transparent;border:1px solid var(--ln);color:var(--a);width:40px;height:40px;font-size:14px;display:flex;align-items:center;justify-content:center}
+
+.tabs{display:flex;gap:24px;border-bottom:1px solid var(--ln);margin-bottom:32px}
+.tab{background:transparent;border:none;font-size:12px;font-weight:700;letter-spacing:2px;color:var(--d);padding:14px 0;border-bottom:2px solid transparent;text-transform:uppercase}
+.tab.on{color:var(--a);border-bottom-color:var(--a)}
+
+.content{min-height:50vh}
+
+h2{font-size:14px;font-weight:700;letter-spacing:2px;margin:32px 0 12px;text-transform:uppercase}
+h2:first-child{margin-top:0}
+p{font-size:13px;line-height:1.9;color:var(--m);margin-bottom:16px}
+code{font-size:12px;color:var(--a);background:var(--ln);padding:2px 6px}
+pre{font-size:11px;line-height:1.7;color:var(--m);padding:16px;border:1px solid var(--ln);overflow-x:auto;margin-bottom:16px;white-space:pre;tab-size:2}
+.sig{font-size:12px;color:var(--a);padding:10px 0;border-bottom:1px solid var(--ln);font-weight:600}
+.sig .params{font-weight:400;color:var(--m)}
+.desc{font-size:12px;color:var(--d);padding:4px 0 14px;line-height:1.7}
+.note{font-size:11px;color:var(--d);border-left:2px solid var(--a);padding:8px 0 8px 14px;margin:16px 0;line-height:1.7}
+table{width:100%;border-collapse:collapse;margin-bottom:16px;font-size:12px}
+th{text-align:left;font-size:10px;font-weight:700;letter-spacing:2px;color:var(--d);padding:10px 0;border-bottom:1px solid var(--ln)}
+td{padding:12px 0;border-bottom:1px solid var(--ln);color:var(--m);word-break:break-all}
+td a{color:var(--a);text-decoration:none;border-bottom:1px solid var(--ln)}
+td a:hover{border-bottom-color:var(--a)}
+
+.footer{border-top:1px solid var(--ln);padding:12px 0;display:flex;justify-content:space-between;font-size:9px;letter-spacing:2px;color:var(--d)}
+.footer a{color:var(--d);text-decoration:none}
+.footer a:hover{color:var(--a)}
+
+@media(max-width:640px){
+  body{padding:6px}
+  .frame{padding:0 6px}
+  .rail{display:none}
+  .hbar{font-size:10px}
+  .logo{font-size:22px}
+  .hdr{padding:18px 0 12px}
+  .tabs{gap:12px;margin-bottom:24px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .tab{font-size:11px;padding:12px 0;white-space:nowrap}
+  h2{font-size:13px;margin:24px 0 10px}
+  p{font-size:12px}
+  pre{font-size:10px;padding:12px}
+}
+</style>
+</head>
+<body>
+<div class="scan"></div>
+<div id="app"></div>
+
+<script>
+const asc=n=>"/".repeat(n);
+let dark=true,tab="OVERVIEW";
+const mob=()=>window.innerWidth<=640;
+
+const TABS=["OVERVIEW","CONTRACT","EXECUTOR","INTERFACE"];
+
+const CONTENT={
+OVERVIEW:`
+<h2>WHAT</h2>
+<p>A multichain multisig wallet with an embedded timelock. Deployed via CREATE2 minimal proxy clones for deterministic addresses across chains.</p>
+
+<h2>WHY</h2>
+<p>Regular multisigs execute instantly once threshold is met. That's fine until a compromised key or social engineering attack drains your treasury in one block. The embedded timelock adds a mandatory delay between queuing and execution, giving owners time to detect and cancel malicious transactions.</p>
+
+<div class="note">Protects against everyday mistakes, defends protocols and their users from malicious upgrades and migrations, and provides more peace of mind than a regular multisig.</div>
+
+<h2>HOW IT WORKS</h2>
+<p>Owners sign transactions off-chain (EIP-712) or approve on-chain. Once threshold signatures are collected, <code>execute()</code> queues the transaction with an ETA based on the configured delay. After the timelock passes, <code>executeQueued()</code> completes it.</p>
+<p>The default executor plugin (TimelockExecutor) adds two parallel paths: <strong>cancel</strong> a queued transaction with threshold signatures, or <strong>instantly execute</strong> with unanimous (all-owner) signatures when opted in. The fast path is optional — vaults must explicitly enable it via <code>enableForward</code>.</p>
+<p>Setting delay to 0 creates an <strong>unlocked</strong> vault — transactions execute immediately once threshold is met, with no timelock. The fast path toggle is hidden since there is no delay to bypass.</p>
+
+<h2>CHAINS</h2>
+<p>Ethereum, Base, Arbitrum, Optimism. Same contract, same address via CREATE2. Testnets: Sepolia, Base Sepolia.</p>
+
+<h2>TOKENS</h2>
+<p>ETH (18 decimals), USDC (6), USDT (6), DAI (18), WBTC (8, cbBTC on Base), wstETH (18). Native ETH receiving and ERC-721/1155 callbacks supported via the fallback function. The UI converts human-readable amounts to raw token units automatically.</p>
+`,
+
+CONTRACT:`
+<h2>MULTISIG.SOL</h2>
+<p>Single contract, ~200 lines. Owners stored as a sorted linked list (sentinel pattern). Sequential nonce. EIP-712 signatures. ERC-1271 support via <code>isValidSignature</code>.</p>
+
+<h2>STATE</h2>
+<pre>uint32  delay        // timelock in seconds (0 = unlocked)
+uint32  nonce        // sequential, increments on execute()
+uint16  threshold    // sigs required
+uint16  ownerCount   // total owners
+address executor     // bypass role (typically TimelockExecutor)</pre>
+
+<h2>CORE FUNCTIONS</h2>
+<div class="sig">execute<span class="params">(target, value, data, sigs)</span></div>
+<div class="desc">Verify signatures, then either execute immediately (delay=0 or caller is executor) or queue with ETA. Nonce increments here. Executor callers skip signature verification entirely.</div>
+
+<div class="sig">executeQueued<span class="params">(target, value, data, nonce)</span></div>
+<div class="desc">Execute a previously queued transaction. Self-calls (msg.sender == address(this)) skip the ETA check — this is how the executor accelerates queued txs. External callers must wait for the ETA to pass. Requires eta != 0 (tx must be queued).</div>
+
+<div class="sig">approve<span class="params">(hash, ok)</span></div>
+<div class="desc">On-chain approval. Owners can pre-approve a transaction hash as an alternative to off-chain EIP-712 signatures. Pass ok=false to revoke. The approve maps to the APPROVE button in the UI, while ok=false maps to UNSIGN.</div>
+
+<div class="sig">cancelQueued<span class="params">(hash)</span></div>
+<div class="desc">onlySelf. Cancel a queued transaction and delete its ETA. Invoked via the executor's cancel path — TimelockExecutor.forward() calls execute() targeting the multisig with cancelQueued calldata, satisfying the onlySelf requirement as a self-call.</div>
+
+<div class="sig">batch<span class="params">(targets[], values[], datas[])</span></div>
+<div class="desc">Execute multiple calls atomically. onlySelf — must be called by the multisig itself via execute(). The UI's BATCH mode in the TX builder encodes this.</div>
+
+<div class="sig">delegateCall<span class="params">(target, data)</span></div>
+<div class="desc">onlySelf. Execute a delegatecall to target. Use for module installations or storage-manipulating upgrades.</div>
+
+<h2>VIEW FUNCTIONS</h2>
+<div class="sig">getTransactionHash<span class="params">(target, value, data, nonce)</span></div>
+<div class="desc">Compute the EIP-712 hash for a transaction. Used by both the multisig and TimelockExecutor for signature verification. Same hash format for both paths.</div>
+
+<div class="sig">isOwner<span class="params">(account)</span> / getOwners<span class="params">()</span></div>
+<div class="desc">Query owner status and list. getOwners walks the linked list from sentinel to sentinel.</div>
+
+<div class="sig">isValidSignature<span class="params">(hash, sigs)</span></div>
+<div class="desc">ERC-1271 signature validation. Wraps the hash in a SafeMessage typehash before verifying. Returns the magic value on success.</div>
+
+<h2>ADMIN (onlySelf)</h2>
+<div class="sig">setThreshold<span class="params">(threshold)</span></div>
+<div class="desc">Must be non-zero and ≤ ownerCount. All admin changes go through the multisig itself — they're proposed as transactions targeting the vault's own address.</div>
+
+<div class="sig">setDelay<span class="params">(delay)</span></div>
+<div class="desc">Timelock period in seconds. Set 0 for unlocked (instant execution, no timelock).</div>
+
+<div class="sig">setExecutor<span class="params">(executor)</span></div>
+<div class="desc">Set to TimelockExecutor address for the default plugin. Set 0x0 to disable bypass entirely. The executor can call execute() without signatures and without timelock delay.</div>
+
+<div class="sig">addOwner<span class="params">(owner)</span> / removeOwner<span class="params">(prev, owner)</span></div>
+<div class="desc">Linked list ops. Owners must be sorted ascending — addOwner prepends to the list. removeOwner requires prevOwner pointer and enforces ownerCount > threshold.</div>
+
+<h2>FACTORY</h2>
+<p><code>MultisigFactory.create()</code> deploys minimal proxy clones via CREATE2 with PUSH0 and calls <code>init()</code> on the new proxy. Salt must start with 0x0 or msg.sender for frontrun protection.</p>
+<p><code>createWithCalls()</code> deploys with the factory as temporary executor, executes post-init calls (like <code>enableForward(true)</code> on the TimelockExecutor), then sets the real executor. Used when the fast path needs to be enabled at deploy time.</p>
+
+<h2>SIGNATURES</h2>
+<p>EIP-712 typed data with <code>Execute(address target,uint256 value,bytes data,uint32 nonce)</code> typehash. Packed as 65-byte chunks (r, s, v). v=0 indicates on-chain approval — address packed in r, verified against the <code>approved</code> mapping or msg.sender. Signers must be sorted ascending (contract enforces signer > prev). Same signature format for Multisig.execute() and TimelockExecutor.forward().</p>
+
+<h2>DEPLOYMENTS</h2>
+<table>
+<tr><th>CONTRACT</th><th>ADDRESS</th></tr>
+<tr><td>MultisigFactory</td><td><a href="https://contractscan.xyz/contract/0x000000000e8CB9ed9DC2114d79d9215eacb9cB07" target="_blank" rel="noopener">0x000000000e8CB9ed9DC2114d79d9215eacb9cB07</a></td></tr>
+<tr><td>Multisig (implementation)</td><td><a href="https://contractscan.xyz/contract/0xD54cb65224410F3Ff97a8E72f363f224419f4FB0" target="_blank" rel="noopener">0xD54cb65224410F3Ff97a8E72f363f224419f4FB0</a></td></tr>
+<tr><td>TimelockExecutor</td><td><a href="https://contractscan.xyz/contract/0x00000000a72A30AdBf38e14d36BCE2610ec3973F" target="_blank" rel="noopener">0x00000000a72A30AdBf38e14d36BCE2610ec3973F</a></td></tr>
+</table>
+<p>Same addresses on all supported chains. Proxy clones deployed via CREATE2 inherit the implementation. View on <a href="https://contractscan.xyz" target="_blank" rel="noopener" style="color:var(--a);border-bottom:1px solid var(--ln);text-decoration:none">contractscan.xyz</a> for multichain verification.</p>
+`,
+
+EXECUTOR:`
+<h2>TIMELOCKEXECUTOR.SOL</h2>
+<p>Singleton executor module — one deployment serves all multisigs. Set as the multisig's executor via <code>setExecutor()</code>. Provides parallel execution paths using the multisig's own EIP-712 signatures.</p>
+
+<div class="note">The same signatures collected for normal execute() work with the executor's forward(). The UI routes based on signature count and target.</div>
+
+<h2>PATHS</h2>
+<div class="sig">CANCEL <span class="params">— threshold sigs, always available</span></div>
+<div class="desc">Cancel a queued transaction. The UI creates a new cancel proposal (consuming a nonce) that targets the multisig with cancelQueued(hash) calldata. Once threshold owners sign, forward() calls execute() as the executor — bypassing sigs and timelock — which self-calls cancelQueued(). No opt-in needed.</div>
+
+<div class="sig">INSTANT EXECUTE <span class="params">— all-owner sigs, opt-in required</span></div>
+<div class="desc">Skip the timelock entirely with unanimous signatures from every owner. Requires the multisig to have called <code>enableForward(true)</code>. forward() verifies all ownerCount sigs, then calls execute() as the executor for immediate execution.</div>
+
+<div class="sig">ACCELERATE <span class="params">— all-owner sigs, opt-in required</span></div>
+<div class="desc">Execute a queued tx before its ETA passes. Forward a self-call to executeQueued() — the multisig skips the ETA check for msg.sender == address(this). Same unanimous + opt-in requirement. This consumes a new nonce for the acceleration call itself.</div>
+
+<h2>CORE FUNCTION</h2>
+<div class="sig">forward<span class="params">(multisig, target, value, data, sigs)</span></div>
+<div class="desc">Verify signatures against the multisig's owners and current nonce, then call multisig.execute(target, value, data, "") with empty sigs. The multisig trusts its executor and skips verification. Signature count determines the path: ownerCount for instant/accelerate, threshold for cancel.</div>
+
+<h2>OPT-IN</h2>
+<div class="sig">enableForward<span class="params">(bool enabled)</span></div>
+<div class="desc">Toggle the instant/accelerate paths. Must be called by the multisig itself — typically via a multisig transaction, or via createWithCalls() at deploy time. Cancel path is always available regardless. The UI shows this toggle in the admin panel under EXECUTOR · INSTANT PATH.</div>
+
+<h2>DESIGN</h2>
+<p>The executor verifies signatures independently before calling <code>execute()</code> with empty sigs — the multisig trusts its executor and skips verification. This means the executor enforces its own rules (unanimous for fast path, threshold for cancel) while the multisig only sees a trusted caller.</p>
+<p>Same EIP-712 Execute typehash as the multisig — no new signature types. Wallet signing UX is identical for both paths. The UI decides which contract to submit to based on how many sigs are collected and whether the target is a cancelQueued call.</p>
+
+<div class="note">WARNING: Do not deploy TimelockExecutor at a vanity 0x1111 address. The Multisig has pre/post execution hooks that check if the executor address starts or ends with 0x1111 and would call into it unexpectedly.</div>
+`,
+
+INTERFACE:`
+<h2>DASHBOARD</h2>
+<p>Vault selector tabs across the top with inline status dots — green (pulsing) for executable transactions, yellow for transactions needing your signature. Primary holding displayed large, secondary tokens inline below. Vaults with no balances show a clean empty state. Metadata line shows threshold ratio, timelock duration (or UNLOCKED in yellow for delay=0), chain, and FAST PATH indicator when enabled.</p>
+<p>An action counter above the tabs summarizes pending items across all vaults: signatures needed, ready to execute, ready to submit.</p>
+
+<h2>SIGNING</h2>
+<p>Two paths: <strong>SIGN</strong> (off-chain EIP-712, free, filled button) or <strong>APPROVE</strong> (on-chain approve() call, costs gas, outline button). Both count toward threshold. <strong>UNSIGN</strong> (outline) withdraws your approval — calls approve(hash, false). Visual hierarchy: filled = primary action, outline = secondary or already completed.</p>
+
+<h2>TRANSACTION LIFECYCLE</h2>
+<pre>STANDARD PATH (delay > 0)
+  NEEDS SIGS → SUBMIT → ETA countdown → READY → EXECUTE
+
+CANCEL PATH (threshold sigs, via executor)
+  QUEUED TX → CANCEL creates new proposal → collect sigs → EXECUTE CANCEL
+
+FAST PATH (all-owner sigs, opt-in, via executor)
+  NEEDS SIGS → INSTANT EXECUTE (or QUEUE WITH TIMELOCK)
+
+UNLOCKED (delay = 0)
+  NEEDS SIGS → EXECUTE (immediate, no timelock)</pre>
+
+<p>The standard path goes through the timelock. Cancel creates a new proposal at the next nonce targeting cancelQueued — it needs threshold signatures and executes immediately via the executor (no timelock for cancels). Cancel proposals are never blocked by the sequential queue since they route through the executor's parallel path and are marked VIA EXECUTOR.</p>
+<p>The fast path appears when all owners have signed AND enableForward is active — offering both INSTANT EXECUTE and QUEUE WITH TIMELOCK as options. Unlocked vaults (delay=0) skip the queue entirely.</p>
+
+<h2>TX BUILDER</h2>
+<p>Three modes:</p>
+<p><strong>TRANSFER</strong> — Token selector shows chain-specific tokens with correct decimal handling: ETH (18), USDC/USDT (6), WBTC/cbBTC (8), DAI/wstETH (18). Amount input shows live conversion to raw token units below the field. For ERC-20s, a note clarifies the on-chain encoding: transfer(recipient, amount) on the token contract.</p>
+<p><strong>CUSTOM</strong> — Raw target address, ETH value (with live wei conversion preview), and calldata textarea. For arbitrary contract interactions.</p>
+<p><strong>BATCH</strong> — Multiple calls with target, value (ETH with wei preview), and calldata. Add/remove calls dynamically. Encodes as a single multisig transaction via batch() — onlySelf, so the multisig calls itself.</p>
+
+<h2>ADMIN</h2>
+<p>Three sub-tabs — POLICY, OWNERS, HISTORY. Vault selector at top allows switching between vaults. All changes flash PROPOSE messages since they require multisig approval (onlySelf).</p>
+<p><strong>POLICY</strong> — Threshold selector with live CHANGED indicator. Delay input in hours with diff preview. Executor address display showing TIMELOCK EXECUTOR (DEFAULT) when using the standard plugin. When delay > 0 and executor is set, an EXECUTOR · INSTANT PATH section shows the enableForward toggle with signature requirement details (N/N for instant, threshold/N for cancel).</p>
+<p><strong>OWNERS</strong> — List with REMOVE buttons (not shown for yourself). Add owner form. removeOwner requires ownerCount > threshold.</p>
+<p><strong>HISTORY</strong> — Executed transaction log with nonce, action type, details, and time.</p>
+
+<h2>CREATE</h2>
+<p>Deploy a new vault via MultisigFactory. Add owner addresses in any order — the app auto-sorts them ascending before submission (contract requirement). Minimum 1 owner. Threshold selector auto-clamps to owner count. Delay in hours — setting 0 shows UNLOCKED warning and hides the fast path toggle.</p>
+<p>When delay > 0, an INSTANT EXECUTION toggle enables the fast path at deploy time. If enabled, deployment uses <code>createWithCalls()</code> to call enableForward(true) on the TimelockExecutor as a post-init step with the factory as temporary executor. Network selector shows supported chains with chain IDs and token lists.</p>
+`
+};
+
+function render(){
+  const m=mob();
+  document.body.className=dark?"":"light";
+  document.getElementById("favicon").href=dark
+    ?"data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%232D5FE8%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%230A0A0A%22%2F%3E%0A%3C%2Fsvg%3E"
+    :"data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%23FDFDFD%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%230099B3%22%2F%3E%0A%3C%2Fsvg%3E";
+  document.getElementById("app").innerHTML=`
+  <div class="frame">
+    ${m?"":`<div class="rail rail-l">${asc(400)}</div><div class="rail rail-r">${asc(400)}</div>`}
+    <div class="hbar">${asc(200)}</div>
+    <div class="hdr">
+      <div>
+        <div class="logo"><a href="javascript:history.back()">MULTISIG</a></div>
+        <div class="logo-sub">DOCUMENTATION</div>
+      </div>
+      <button class="theme-btn" onclick="dark=!dark;render()">${dark?"☀":"●"}</button>
+    </div>
+    <div class="tabs">
+      ${TABS.map(t=>`<button class="tab${tab===t?" on":""}" onclick="tab='${t}';render()">${t}</button>`).join("")}
+    </div>
+    <div class="content">${CONTENT[tab]}</div>
+    <div class="footer">
+      <span>MULTISIG.SOFTWARE</span>
+      <a href="https://github.com/z0r0z/multisig" target="_blank" rel="noopener">GITHUB</a>
+      <a href="javascript:history.back()">&larr; BACK TO APP</a>
+    </div>
+    <div class="hbar">${asc(200)}</div>
+  </div>`;
+}
+
+render();
+window.addEventListener("resize",render);
+</script>
+</body>
+</html>

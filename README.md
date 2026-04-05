@@ -1,5 +1,11 @@
 # Multisig
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="dark-logo.svg">
+  <source media="(prefers-color-scheme: light)" srcset="logo.svg">
+  <img alt="multisig" src="dark-logo.svg" width="64" height="64">
+</picture>
+
 ![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)
 
 Minimal k-of-n multisig wallet with optional timelock, executor module, pre/post transaction guards, onchain approvals, batched execution, and delegatecall. Two deployment paths: factory clones and EIP-7702 EOA delegation. All mutable state (`delay`, `nonce`, `threshold`, `ownerCount`, `executor`) is packed into a single storage slot.
@@ -171,6 +177,16 @@ This multisig: `forge test --mc GasTest -vv` (`gasleft()` snapshots, warm storag
 - Safe's overhead pays for guard hooks, gas refunds, EIP-1271 contract signatures, and fallback handler dispatch.
 
 Safe composes features as separate contracts (modules, guards, fallback handlers). This multisig ships them as built-in primitives in a single file with all hot-path state in one slot. The executor doubles as a pre/post transaction guard via vanity address encoding — zero additional storage. Point the executor at a router contract to dispatch across multiple sub-modules without per-wallet storage overhead.
+
+## Deployments
+
+| Contract | Address |
+|----------|---------|
+| MultisigFactory | [`0x000000000e8CB9ed9DC2114d79d9215eacb9cB07`](https://contractscan.xyz/contract/0x000000000e8CB9ed9DC2114d79d9215eacb9cB07) |
+| Multisig (implementation) | [`0xD54cb65224410F3Ff97a8E72f363f224419f4FB0`](https://contractscan.xyz/contract/0xD54cb65224410F3Ff97a8E72f363f224419f4FB0) |
+| TimelockExecutor | [`0x00000000a72A30AdBf38e14d36BCE2610ec3973F`](https://contractscan.xyz/contract/0x00000000a72A30AdBf38e14d36BCE2610ec3973F) |
+
+Deployed via [SafeSummoner](https://contractscan.xyz/contract/0x00000000004473e1f31C8266612e7FD5504e6f2a) on Ethereum, Base, Arbitrum, Optimism, Sepolia, and Base Sepolia.
 
 ## License
 

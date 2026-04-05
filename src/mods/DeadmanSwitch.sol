@@ -11,9 +11,9 @@ contract DeadmanSwitch {
     event Claimed(address indexed multisig, address indexed beneficiary, uint256 amount);
     event Configured(address indexed multisig, address indexed beneficiary, uint256 timeout);
 
-    error InvalidConfig();
     error StillAlive();
     error Unauthorized();
+    error InvalidConfig();
 
     struct Config {
         address beneficiary;

@@ -1,5 +1,5 @@
 # DeadmanSwitch
-[Git Source](https://github.com/z0r0z/multisig/blob/cc44c047f803ce7557afb7fae62a8a291e204efe/src/mods/DeadmanSwitch.sol)
+[Git Source](https://github.com/z0r0z/multisig/blob/88f2fd9c70fcd2f83b9d61859bb5b7eeef042d87/src/mods/DeadmanSwitch.sol)
 
 Post-guard and executor that enables a beneficiary to sweep funds
 after a period of inactivity. Deploy at a vanity address with trailing
@@ -60,12 +60,6 @@ event Configured(address indexed multisig, address indexed beneficiary, uint256 
 ```
 
 ## Errors
-### InvalidConfig
-
-```solidity
-error InvalidConfig();
-```
-
 ### StillAlive
 
 ```solidity
@@ -76,6 +70,12 @@ error StillAlive();
 
 ```solidity
 error Unauthorized();
+```
+
+### InvalidConfig
+
+```solidity
+error InvalidConfig();
 ```
 
 ## Structs

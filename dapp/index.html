@@ -536,7 +536,7 @@ function nextNonce(v){return v.queue.length?Math.max(v.nonce,...v.queue.map(t=>t
 function txSt(tx,v){
   const you = getYou();
   const ac=Object.values(tx.approvals).filter(Boolean).length;
-  if(tx.eta>0){if(fmtEta(tx.eta)==="READY")return{l:"READY",c:"var(--g)",exec:true,cancel:true};return{l:fmtEta(tx.eta),c:"var(--d)",cancel:true,accel:v.fastPath}}
+  if(tx.eta>0){if(fmtEta(tx.eta)==="READY")return{l:"READY",c:"var(--g)",exec:true,cancel:true};const youSigned=you&&tx.accelSigners&&tx.accelSigners.has(you.toLowerCase());return{l:fmtEta(tx.eta),c:"var(--d)",cancel:true,accel:v.fastPath&&!youSigned,accelSigs:tx.accelSigners?tx.accelSigners.size:0}}
   if(ac<v.threshold)return{l:`${ac}/${v.threshold} SIGS`,c:"var(--y)",sign:true};
   if(v.delay===0)return{l:"EXECUTE",c:"var(--g)",queue:true,instant:true};
   return{l:"SUBMIT",c:"var(--a)",queue:true};
@@ -813,11 +813,13 @@ function renderDash(v,mob){
     }else if(s.cancel){
       actionBtn=mob
         ?`<div style="display:flex;gap:8px;flex-direction:column">
-            ${s.accel?`<button class="btn btn-outline btn-w" onclick="doAccelerate(${S.sel},${tx.nonce})">ACCELERATE</button>`:''}
+            ${s.accel?`<button class="btn btn-outline btn-w" onclick="doAccelerate(${S.sel},${tx.nonce})">ACCELERATE${s.accelSigs?` (${s.accelSigs}/${v.ownerCount})`:''}</button>`:''}
+            ${!s.accel&&s.accelSigs?`<span style="font-size:10px;color:var(--d);letter-spacing:1px">ACCELERATE ${s.accelSigs}/${v.ownerCount}</span>`:''}
             <button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL</button>
           </div>`
         :`<div style="display:flex;gap:8px">
-            ${s.accel?`<button class="btn btn-outline" onclick="doAccelerate(${S.sel},${tx.nonce})">ACCELERATE</button>`:''}
+            ${s.accel?`<button class="btn btn-outline" onclick="doAccelerate(${S.sel},${tx.nonce})">ACCELERATE${s.accelSigs?` (${s.accelSigs}/${v.ownerCount})`:''}</button>`:''}
+            ${!s.accel&&s.accelSigs?`<span style="font-size:10px;color:var(--d);letter-spacing:1px">ACCELERATE ${s.accelSigs}/${v.ownerCount}</span>`:''}
             <button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL</button>
           </div>`;
     }
@@ -1589,6 +1591,19 @@ async function loadVaultQueue(vi) {
     // Track stale txs to clean up in DB
     const staleTxIds = [];
 
+    // Build accelerate sig counts: map original nonce → set of signers
+    const accelSigs = {};
+    for(let ti = 0; ti < txs.length; ti++) {
+      const t = txs[ti];
+      if(t.description && t.description.startsWith('Accelerate #')) {
+        const origNonce = parseInt(t.description.replace('Accelerate #', ''));
+        if(!isNaN(origNonce)) {
+          const sigs = allSigs[ti];
+          accelSigs[origNonce] = new Set(sigs.map(s => s.signer.toLowerCase()));
+        }
+      }
+    }
+
     for(let ti = 0; ti < txs.length; ti++) {
       const t = txs[ti];
 
@@ -1597,6 +1612,9 @@ async function loadVaultQueue(vi) {
         staleTxIds.push(t.id);
         continue;
       }
+
+      // Skip accelerate entries — they collect sigs via forward(), not the regular queue
+      if(t.description && t.description.startsWith('Accelerate #')) continue;
 
       // Prune queued txs that are no longer queued on-chain (executed or cancelled externally)
       if(t.status === 'queued' && t.tx_hash && t.tx_hash in onchainQueued) {
@@ -1649,7 +1667,8 @@ async function loadVaultQueue(vi) {
         txHash: t.tx_hash,
         callData: t.call_data,
         rawValue: t.value,
-        signatures: sigs.map(s => ({signer: s.signer, sig: s.signature, sigType: s.sig_type}))
+        signatures: sigs.map(s => ({signer: s.signer, sig: s.signature, sigType: s.sig_type})),
+        accelSigners: accelSigs[t.nonce] || null
       });
     }
     v.queue = queue;

@@ -142,7 +142,7 @@ DROP VIEW IF EXISTS pending_txs; -- legacy, removed
 DROP VIEW IF EXISTS tx_summary;
 DROP VIEW IF EXISTS my_wallets;
 
-CREATE VIEW my_wallets AS
+CREATE OR REPLACE VIEW my_wallets AS
   SELECT
     w.id, w.chain_id, w.address, w.name, w.threshold, w.owner_count,
     w.delay, w.executor, w.nonce,
@@ -150,7 +150,7 @@ CREATE VIEW my_wallets AS
   FROM wallets w
   JOIN owners o ON o.wallet_id = w.id AND o.is_current = true;
 
-CREATE VIEW tx_summary AS
+CREATE OR REPLACE VIEW tx_summary AS
   SELECT
     t.*,
     count(s.id) AS sig_count,
@@ -165,7 +165,7 @@ CREATE VIEW tx_summary AS
   LEFT JOIN signatures s ON s.tx_id = t.id
   GROUP BY t.id;
 
-CREATE VIEW tx_history AS
+CREATE OR REPLACE VIEW tx_history AS
   SELECT
     t.id, t.wallet_id, t.nonce, t.target, t.value, t.call_data,
     t.tx_hash, t.status, t.description, t.proposed_by,

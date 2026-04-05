@@ -622,6 +622,13 @@ function render(){
 
   const vAddr = v ? (S.demoMode ? addrLink(v.address,v.chain) : addrLink(v.address)) : '';
 
+  // Sync URL hash for deep linking
+  if(v && !S.demoMode && v.address && ethers.isAddress(v.address)) {
+    history.replaceState(null, '', '#' + S.chainId + '/' + v.address);
+  } else if(!v || S.demoMode) {
+    if(location.hash) history.replaceState(null, '', location.pathname);
+  }
+
   document.getElementById("app").innerHTML = `
   <div class="frame">
     ${mob?"":`<div class="rail rail-l">${ASC400}</div><div class="rail rail-r">${ASC400}</div>`}
@@ -630,7 +637,7 @@ function render(){
       <div>
         <div class="logo">MULTISIG <span class="info-i" onclick="toggleInfo()">?</span></div>
         <div class="sub">.software</div>
-        ${v?`<div class="addr">${vAddr}</div>`:""}
+        ${v?`<div class="addr">${vAddr}${!S.demoMode&&v.address&&ethers.isAddress(v.address)?` <button class="x-btn" style="font-size:9px;opacity:.5;vertical-align:middle" onclick="navigator.clipboard.writeText(location.href);flash('LINK COPIED')" title="${location.origin}/#${S.chainId}/${v.address}">\u29C9</button>`:""}</div>`:""}
       </div>
       <div class="hdr-r">
         <button class="theme-btn" onclick="S.dark=!S.dark;localStorage.setItem('ms_light',S.dark?'':'1');render()">${S.dark?"\u2600":"\u25CF"}</button>
@@ -2353,23 +2360,95 @@ async function prodAccelerate(vi, nonce) {
   const value = tx.rawValue ? BigInt(tx.rawValue) : ethers.parseEther(tx.value || '0');
   const data = tx.callData || '0x';
 
-  // Self-call to executeQueued — multisig skips ETA check for self-calls
+  // Accelerate uses executor.forward() with a self-call to executeQueued
+  // This requires unanimous (all owners) signatures, same as instant execute
+  // forward() hashes with the live nonce, so all signers must agree on the same nonce
   const accelData = msIface.encodeFunctionData('executeQueued', [target, value, data, nonce]);
-  const accelNonce = nextNonce(v);
   const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
+  const ownerAddrs = v.loadedOwners || v.owners.map(o => o.addr);
 
   try {
-    const accelMsg = { target: v.address, value: 0n, data: accelData, nonce: accelNonce };
-    const sig = await signer.signTypedData(domain, EIP712_TYPES, accelMsg);
-    const accelTxHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, accelMsg);
-
+    // Check DB for an existing accelerate proposal (first signer sets the nonce)
+    let accelNonce = v.nonce;
+    let existingSigs = [];
+    let existingTxId = null;
     if(v.dbId) {
-      const txId = await dbProposeTx(v.dbId, accelNonce, v.address, '0', accelData, accelTxHash, v.threshold, connectedAddress, `Accelerate #${nonce}`);
-      if(txId) await dbAddSig(txId, connectedAddress, sig);
+      // Look for an existing accelerate entry for this original tx nonce
+      const { data: rows } = await sb.from('transactions')
+        .select('id, nonce, tx_hash')
+        .eq('wallet_id', v.dbId)
+        .eq('description', `Accelerate #${nonce}`)
+        .in('status', ['proposed', 'executing'])
+        .limit(1);
+      if(rows?.length) {
+        existingTxId = rows[0].id;
+        accelNonce = rows[0].nonce;
+        const dbSigs = await dbGetSigs(existingTxId);
+        const msg = { target: v.address, value: 0n, data: accelData, nonce: accelNonce };
+        existingSigs = verifySigs(dbSigs, domain, EIP712_TYPES, msg, ownerAddrs);
+        // If nonce changed on-chain and existing sigs are invalid, start fresh
+        if(existingSigs.length === 0 && dbSigs.length > 0) {
+          accelNonce = v.nonce;
+          existingTxId = null;
+        }
+      }
     }
 
-    flash(`ACCELERATE PROPOSED #${accelNonce} \u2192 executeQueued(#${nonce})`);
-    await reloadQueue(vi);
+    const msg = { target: v.address, value: 0n, data: accelData, nonce: accelNonce };
+    const accelTxHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
+
+    // Add caller's sig
+    let sigs = [...existingSigs];
+    const callerIsOwner = ownerAddrs.some(o => o.toLowerCase() === connectedAddress.toLowerCase());
+    const callerHasSigned = sigs.some(s => s.signer.toLowerCase() === connectedAddress.toLowerCase());
+    if(callerIsOwner && !callerHasSigned) {
+      const sig = await signer.signTypedData(domain, EIP712_TYPES, msg);
+      sigs.push({signer: connectedAddress, sig, sigType: 'ecdsa'});
+      // Store sig in DB
+      if(v.dbId) {
+        if(!existingTxId) {
+          existingTxId = await dbProposeTx(v.dbId, accelNonce, v.address, '0', accelData, accelTxHash, v.ownerCount, connectedAddress, `Accelerate #${nonce}`);
+        }
+        if(existingTxId) await dbAddSig(existingTxId, connectedAddress, sig);
+      }
+    }
+    sigs.sort((a,b) => a.signer.toLowerCase() < b.signer.toLowerCase() ? -1 : 1);
+
+    if(sigs.length < v.ownerCount) {
+      flash(`SIGNED ACCELERATE (${sigs.length}/${v.ownerCount}) — NEED ALL OWNERS`);
+      await reloadQueue(vi);
+      return;
+    }
+
+    // Verify nonce still matches on-chain before executing
+    const ms = new ethers.Contract(v.address, MULTISIG_ABI, provider);
+    const liveNonce = Number(await ms.nonce());
+    if(liveNonce !== accelNonce) {
+      flash('NONCE CHANGED — RESIGNING NEEDED');
+      // Invalidate stale sigs in DB
+      if(existingTxId) {
+        await sb.from('transactions').update({status: 'cancelled', cancelled_at: new Date().toISOString()}).eq('id', existingTxId);
+      }
+      await reloadQueue(vi);
+      return;
+    }
+
+    // All sigs collected — execute via forward()
+    let packedSigs = '0x';
+    for(const s of sigs) packedSigs += s.sig.slice(2);
+
+    const tlContract = new ethers.Contract(v.executor, TIMELOCK_EXECUTOR_ABI, signer);
+    flash('ACCELERATING VIA EXECUTOR...');
+    const atx = await tlContract.forward(v.address, v.address, 0n, accelData, packedSigs);
+    flash('TX SENT, WAITING...');
+    const receipt = await atx.wait();
+
+    if(v.dbId) {
+      if(existingTxId) await dbMarkExecuted(existingTxId, Number(receipt.blockNumber), receipt.hash);
+      if(tx.dbId) await dbMarkExecuted(tx.dbId, Number(receipt.blockNumber), receipt.hash);
+    }
+    flash(`ACCELERATED #${nonce} VIA EXECUTOR`);
+    await reloadVault(vi);
   } catch(e) {
     console.error(e);
     flash(e.shortMessage || e.message || 'ACCELERATE FAILED');

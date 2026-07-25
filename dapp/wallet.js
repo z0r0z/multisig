@@ -5,6 +5,24 @@ const WEINS = '0x0000000000696760E15f265e828DB644A0c242EB';
 const WEINS_ABI = ['function reverseResolve(address) view returns (string)'];
 const WC_PROJECT_ID = '1e8390ef1c1d8a185e035912a1409749';
 
+// WalletConnect (~635KB) is only needed if the user actually picks it, so it is
+// not shipped in the initial page load. Inject it on demand, once, and cache
+// the promise so concurrent/repeat callers share a single download.
+let _wcLoadPromise = null;
+function loadWalletConnect() {
+  if (globalThis['@walletconnect/ethereum-provider']) return Promise.resolve();
+  if (_wcLoadPromise) return _wcLoadPromise;
+  _wcLoadPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = './walletconnect.min.js';
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => { _wcLoadPromise = null; reject(new Error('Failed to load WalletConnect')); };
+    document.head.appendChild(s);
+  });
+  return _wcLoadPromise;
+}
+
 const _escMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;' };
 function _esc(s) { return String(s).replace(/[&<>]/g, m => _escMap[m]); }
 
@@ -14,7 +32,6 @@ window._signer = null;
 window._connectedAddress = null;
 window._walletDisplayName = null;
 window._walletConnecting = false;
-window._isWalletConnect = false;
 window._connectedWalletProvider = null;
 window.eip6963Providers = new Map();
 
@@ -113,6 +130,7 @@ async function connectWithWallet(walletKey) {
     closeWalletModal();
     let walletProvider;
     if (walletKey === 'walletconnect') {
+      await loadWalletConnect();
       const wcModule = globalThis['@walletconnect/ethereum-provider'];
       const WCProvider = wcModule?.EthereumProvider;
       if (!WCProvider?.init) throw new Error('WalletConnect not available');
@@ -120,7 +138,6 @@ async function connectWithWallet(walletKey) {
       _walletConnectProvider = await WCProvider.init({ projectId: WC_PROJECT_ID, chains: [_targetChainId], showQrModal: true, rpcMap: { [_targetChainId]: _targetRpc }, metadata: { name: _appName, description: _appName, url: window.location.origin, icons: [] } });
       await _walletConnectProvider.enable();
       walletProvider = _walletConnectProvider;
-      _isWalletConnect = true;
     } else if (walletKey.startsWith('eip6963_')) {
       const uuid = walletKey.replace('eip6963_', '');
       walletProvider = eip6963Providers.get(uuid)?.provider;
@@ -132,10 +149,8 @@ async function connectWithWallet(walletKey) {
           }
         }
       }
-      _isWalletConnect = false;
     } else {
       walletProvider = window.ethereum;
-      _isWalletConnect = false;
     }
     if (!walletProvider) throw new Error('Wallet not found');
 
@@ -212,7 +227,6 @@ window.disconnectWallet = function() {
   _signer = null;
   _connectedAddress = null;
   _connectedWalletProvider = null;
-  _isWalletConnect = false;
   _walletDisplayName = null;
   _walletConnecting = false;
 
@@ -230,25 +244,28 @@ window.connectWallet = async function() {
 // --- Name resolution ---
 const _ethRpcs = ['https://ethereum.publicnode.com','https://1rpc.io/eth','https://eth.drpc.org'];
 const _ethMainProvider = new ethers.FallbackProvider(
-  _ethRpcs.map((url, i) => ({ provider: new ethers.JsonRpcProvider(url, 1, {staticNetwork:true}), priority: i + 1, stallTimeout: 2000 })), 1
+  _ethRpcs.map((url, i) => ({ provider: new ethers.JsonRpcProvider(url, 1, {staticNetwork:true}), priority: i + 1, stallTimeout: 2000 })), 1, { quorum: 1 }
 );
 
 function resolveWeiName(addr) {
   try {
     const ns = new ethers.Contract(WEINS, WEINS_ABI, _ethMainProvider);
-    ns.reverseResolve(addr).then(name => {
-      if (name && _connectedAddress === addr) {
-        _walletDisplayName = name.toLowerCase();
-        notifyDisplayUpdate();
-      }
-    }).catch(() => {
+    const tryEns = () => {
       _ethMainProvider.lookupAddress(addr).then(ensName => {
         if (ensName && _connectedAddress === addr) {
           _walletDisplayName = ensName;
           notifyDisplayUpdate();
         }
       }).catch(() => {});
-    });
+    };
+    ns.reverseResolve(addr).then(name => {
+      if (name && _connectedAddress === addr) {
+        _walletDisplayName = name.toLowerCase();
+        notifyDisplayUpdate();
+      } else {
+        tryEns(); // no .wei name — fall back to ENS
+      }
+    }).catch(tryEns);
   } catch (e) {}
 }
 window.resolveWeiName = resolveWeiName;

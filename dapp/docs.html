@@ -4,19 +4,24 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>multisig</title>
-<link id="favicon" rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%232D5FE8%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%230A0A0A%22%2F%3E%0A%3C%2Fsvg%3E" type="image/svg+xml">
+<link id="favicon" rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%232D5FE8%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%23F5FBFF%22%2F%3E%0A%3C%2Fsvg%3E" type="image/svg+xml">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-text-size-adjust:100%}
+/* Ink ladder — kept in step with index.html. See the note there for the
+   derivation; figures are APCA Lc against each theme's own --bg. */
 :root{
-  --a:#0A0A0A;--bg:#2D5FE8;--d:#0A0A0A99;--m:#0A0A0ACC;
-  --ln:#0A0A0A1A;--fr:#0A0A0A38;--g:#7DFFBA;--gc:#000;
+  /* Lc:      78.1        —          64.3        73.3   */
+  --a:#F5FBFF;--bg:#2D5FE8;--d:#D6E6FF;--m:#EAF4FF;
+  /* Lc:       9.5         16.2        65.7 */
+  --ln:#FFFFFF2E;--fr:#FFFFFF47;--g:#7DFFBA;--gc:#0A0A0A;--on:#0A0A0A;
   --f:'IBM Plex Mono','Courier New',monospace;
 }
 .light{
-  --a:#0099B3;--bg:#FDFDFD;--d:#007A8FAA;--m:#006A7DDD;
-  --ln:#0099B31A;--fr:#0099B332;--g:#059669;--gc:#fff;
+  /* Lc:      80.5        —          65.2        73.3   */
+  --a:#00677C;--bg:#FDFDFD;--d:#008CA6;--m:#007990;
+  --ln:#0099B326;--fr:#0099B340;--g:#059669;--gc:#fff;--on:#FDFDFD;
 }
 body{font-family:var(--f);background:var(--bg);color:var(--a);min-height:100vh;padding:10px;transition:background .3s,color .3s}
 a{color:var(--a)}
@@ -53,8 +58,8 @@ code{font-size:12px;color:var(--a);background:var(--ln);padding:2px 6px}
 pre{font-size:11px;line-height:1.7;color:var(--m);padding:16px;border:1px solid var(--ln);overflow-x:auto;margin-bottom:16px;white-space:pre;tab-size:2}
 .sig{font-size:12px;color:var(--a);padding:10px 0;border-bottom:1px solid var(--ln);font-weight:600}
 .sig .params{font-weight:400;color:var(--m)}
-.desc{font-size:12px;color:var(--d);padding:4px 0 14px;line-height:1.7}
-.note{font-size:11px;color:var(--d);border-left:2px solid var(--a);padding:8px 0 8px 14px;margin:16px 0;line-height:1.7}
+.desc{font-size:12px;color:var(--m);padding:4px 0 14px;line-height:1.7}
+.note{font-size:11px;color:var(--m);border-left:2px solid var(--a);padding:8px 0 8px 14px;margin:16px 0;line-height:1.7}
 table{width:100%;border-collapse:collapse;margin-bottom:16px;font-size:12px}
 th{text-align:left;font-size:10px;font-weight:700;letter-spacing:2px;color:var(--d);padding:10px 0;border-bottom:1px solid var(--ln)}
 td{padding:12px 0;border-bottom:1px solid var(--ln);color:var(--m);word-break:break-all}
@@ -86,7 +91,7 @@ td a:hover{border-bottom-color:var(--a)}
 
 <script>
 const asc=n=>"/".repeat(n);
-let dark=true,tab="OVERVIEW";
+let dark=!localStorage.getItem('ms_light'),tab="OVERVIEW";
 const mob=()=>window.innerWidth<=640;
 
 const TABS=["OVERVIEW","CONTRACT","EXECUTOR","INTERFACE"];
@@ -107,7 +112,7 @@ OVERVIEW:`
 <p>Setting delay to 0 creates an <strong>unlocked</strong> vault — transactions execute immediately once threshold is met, with no timelock. The fast path toggle is hidden since there is no delay to bypass.</p>
 
 <h2>CHAINS</h2>
-<p>Ethereum, Base, Arbitrum, Optimism. Same contract, same address via CREATE2. Testnets: Sepolia, Base Sepolia.</p>
+<p>Ethereum, Base, MegaETH, Arbitrum, Optimism. Same contract, same address via CREATE2. Testnets: Sepolia, Base Sepolia.</p>
 
 <h2>TOKENS</h2>
 <p>ETH (18 decimals), USDC (6), USDT (6), DAI (18), WBTC (8, cbBTC on Base), wstETH (18). Native ETH receiving and ERC-721/1155 callbacks supported via the fallback function. The UI converts human-readable amounts to raw token units automatically.</p>
@@ -115,7 +120,7 @@ OVERVIEW:`
 
 CONTRACT:`
 <h2>MULTISIG.SOL</h2>
-<p>Single contract, ~200 lines. Owners stored as a sorted linked list (sentinel pattern). Sequential nonce. EIP-712 signatures. ERC-1271 support via <code>isValidSignature</code>.</p>
+<p>Single contract, ~200 lines. Owners stored as a linked list (sentinel pattern). Sequential nonce. EIP-712 signatures. ERC-1271 support via <code>isValidSignature</code>.</p>
 
 <h2>STATE</h2>
 <pre>uint32  delay        // timelock in seconds (0 = unlocked)
@@ -164,7 +169,7 @@ address executor     // bypass role (typically TimelockExecutor)</pre>
 <div class="desc">Set to TimelockExecutor address for the default plugin. Set 0x0 to disable bypass entirely. The executor can call execute() without signatures and without timelock delay.</div>
 
 <div class="sig">addOwner<span class="params">(owner)</span> / removeOwner<span class="params">(prev, owner)</span></div>
-<div class="desc">Linked list ops. Owners must be sorted ascending — addOwner prepends to the list. removeOwner requires prevOwner pointer and enforces ownerCount > threshold.</div>
+<div class="desc">Linked list ops. addOwner inserts the new owner right after the sentinel (list order isn't kept sorted). removeOwner takes the prevOwner pointer and enforces ownerCount > threshold. Sorting is only required for the init owner array and for signature bundles.</div>
 
 <h2>FACTORY</h2>
 <p><code>MultisigFactory.create()</code> deploys minimal proxy clones via CREATE2 with PUSH0 and calls <code>init()</code> on the new proxy. Salt must start with 0x0 or msg.sender for frontrun protection.</p>
@@ -218,6 +223,7 @@ INTERFACE:`
 <h2>DASHBOARD</h2>
 <p>Vault selector tabs across the top with inline status dots — green (pulsing) for executable transactions, yellow for transactions needing your signature. Primary holding displayed large, secondary tokens inline below. Vaults with no balances show a clean empty state. Metadata line shows threshold ratio, timelock duration (or UNLOCKED in yellow for delay=0), chain, and FAST PATH indicator when enabled.</p>
 <p>An action counter above the tabs summarizes pending items across all vaults: signatures needed, ready to execute, ready to submit.</p>
+<p>With no vaults loaded, the empty state offers CREATE VAULT or loading any existing vault by address or <code>.eth</code> / <code>.wei</code> name.</p>
 
 <h2>SIGNING</h2>
 <p>Two paths: <strong>SIGN</strong> (off-chain EIP-712, free, filled button) or <strong>APPROVE</strong> (on-chain approve() call, costs gas, outline button). Both count toward threshold. <strong>UNSIGN</strong> (outline) withdraws your approval — calls approve(hash, false). Visual hierarchy: filled = primary action, outline = secondary or already completed.</p>
@@ -260,7 +266,7 @@ function render(){
   const m=mob();
   document.body.className=dark?"":"light";
   document.getElementById("favicon").href=dark
-    ?"data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%232D5FE8%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%230A0A0A%22%2F%3E%0A%3C%2Fsvg%3E"
+    ?"data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%232D5FE8%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%23F5FBFF%22%2F%3E%0A%3C%2Fsvg%3E"
     :"data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%23FDFDFD%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%230099B3%22%2F%3E%0A%3C%2Fsvg%3E";
   document.getElementById("app").innerHTML=`
   <div class="frame">
@@ -271,7 +277,7 @@ function render(){
         <div class="logo"><a href="javascript:history.back()">MULTISIG</a></div>
         <div class="logo-sub">DOCUMENTATION</div>
       </div>
-      <button class="theme-btn" onclick="dark=!dark;render()">${dark?"☀":"●"}</button>
+      <button class="theme-btn" onclick="dark=!dark;localStorage.setItem('ms_light',dark?'':'1');render()">${dark?"☀":"●"}</button>
     </div>
     <div class="tabs">
       ${TABS.map(t=>`<button class="tab${tab===t?" on":""}" onclick="tab='${t}';render()">${t}</button>`).join("")}
@@ -279,7 +285,7 @@ function render(){
     <div class="content">${CONTENT[tab]}</div>
     <div class="footer">
       <span>MULTISIG.SOFTWARE</span>
-      <a href="https://github.com/z0r0z/multisig" target="_blank" rel="noopener">GITHUB</a>
+      <a href="https://github.com/src-company/multisig" target="_blank" rel="noopener">GITHUB</a>
       <a href="javascript:history.back()">&larr; BACK TO APP</a>
     </div>
     <div class="hbar">${asc(200)}</div>
